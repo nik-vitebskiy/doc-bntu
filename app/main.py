@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from .models import Base, engine, SessionLocal, Organization, Contract, OrderItem, Upload
+from .models import Base, engine, SessionLocal, Organization, Contract, OrderItem
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement
 from .services.organization_service import attach_scan, create_contract, create_organization, registry as get_registry, save_item
