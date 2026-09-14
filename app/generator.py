@@ -12,5 +12,5 @@ def render_agreement(contract, out_path):
         items.append({"specialty": item.specialty, "qualification": item.qualification, "demand": demand})
     years = sorted(years)
     doc = DocxTemplate("templates/dop_soglashenie.docx")
-    doc.render({"org_name": org.name, "org_address": org.address or "________________", "contract_number": contract.number or "________________", "contract_date": contract.start_date.strftime("%d.%m.%Y") if contract.start_date else "________________", "faculty": contract.faculty, "years": years, "items": items})
+    doc.render({"org_name": org.name, "org_address": org.address or "________________", "contract_number": contract.number or "________________", "contract_date": contract.start_date.strftime("%d.%m.%Y") if contract.start_date else "________________", "faculty": contract.faculty.name, "years": years, "items": items})
     doc.save(out_path)

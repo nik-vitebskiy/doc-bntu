@@ -1,46 +1,147 @@
-from datetime import date
-from sqlalchemy import String, ForeignKey, Text, Date
+import json
+from datetime import date, datetime
+from pathlib import Path
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
-class Organization(Base):
-    __tablename__ = "organizations"
+
+class AppUser(Base):
+    __tablename__ = "app_user"
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(500), unique=True)
-    full_name: Mapped[str] = mapped_column(String(700), default="")
-    address: Mapped[str] = mapped_column(Text, default="")
-    profile: Mapped[str] = mapped_column(String(500), default="")
-    phones: Mapped[str] = mapped_column(String(300), default="")
-    department: Mapped[str] = mapped_column(String(500), default="")
-    contact: Mapped[str] = mapped_column(String(500), default="")
+    username: Mapped[str] = mapped_column(String(100), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Faculty(Base):
+    __tablename__ = "faculty"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
+    contracts: Mapped[list["Contract"]] = relationship(back_populates="faculty")
+
+
+class Organization(Base):
+    __tablename__ = "organization"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    unp: Mapped[str] = mapped_column(String(9), unique=True)
+    short_name: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[str] = mapped_column(Text)
+    legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    authority: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contracts: Mapped[list["Contract"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    representatives: Mapped[list["OrganizationRepresentative"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    @property
+    def name(self): return self.short_name
+    @property
+    def address(self): return self.legal_address
+    @property
+    def department(self): return self.authority
+    @property
+    def phones(self): return self.phone
+    @property
+    def contact(self): return self.representatives[0].full_name if self.representatives else ""
+
+
+class OrganizationRepresentative(Base):
+    __tablename__ = "organization_representative"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
+    full_name: Mapped[str] = mapped_column(String(255))
+    position: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    authority_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organization: Mapped[Organization] = relationship(back_populates="representatives")
+
 
 class Contract(Base):
-    __tablename__ = "contracts"
+    __tablename__ = "contract"
     id: Mapped[int] = mapped_column(primary_key=True)
-    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
-    faculty: Mapped[str] = mapped_column(String(300), default="")
-    number: Mapped[str] = mapped_column(String(300), default="")
-    status: Mapped[str] = mapped_column(String(100), default="Активен")
-    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
+    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculty.id"))
+    number: Mapped[str] = mapped_column(String(100))
+    start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
     organization: Mapped[Organization] = relationship(back_populates="contracts")
-    items: Mapped[list["OrderItem"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
-    uploads: Mapped[list["Upload"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
+    faculty: Mapped[Faculty] = relationship(back_populates="contracts")
+    orders: Mapped[list["Order"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
+    documents: Mapped[list["Document"]] = relationship(back_populates="contract")
+    @property
+    def faculty_name(self): return self.faculty.name
+    @property
+    def items(self): return [item for order in self.orders for item in order.items]
+    @property
+    def uploads(self): return [doc for doc in self.documents if doc.type == "SIGNED_SCAN"]
+
+
+class Specialty(Base):
+    __tablename__ = "specialty"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    qualification: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    faculty: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contract.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="DRAFT")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    contract: Mapped[Contract | None] = relationship(back_populates="orders")
+    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+
 
 class OrderItem(Base):
-    __tablename__ = "order_items"
+    __tablename__ = "order_item"
     id: Mapped[int] = mapped_column(primary_key=True)
-    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id"))
-    specialty: Mapped[str] = mapped_column(String(300), default="")
-    qualification: Mapped[str] = mapped_column(String(300), default="")
-    demand_json: Mapped[str] = mapped_column(Text, default="{}")
-    contract: Mapped[Contract] = relationship(back_populates="items")
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
+    specialty_id: Mapped[int] = mapped_column(ForeignKey("specialty.id"))
+    order: Mapped[Order] = relationship(back_populates="items")
+    specialty_ref: Mapped[Specialty] = relationship()
+    annual_demands: Mapped[list["AnnualDemand"]] = relationship(back_populates="order_item", cascade="all, delete-orphan")
+    @property
+    def contract_id(self): return self.order.contract_id
+    @property
+    def contract(self): return self.order.contract
+    @property
+    def specialty(self): return self.specialty_ref.code
+    @property
+    def qualification(self): return self.specialty_ref.qualification or ""
+    @property
+    def demand_json(self): return json.dumps({str(row.year): row.quantity for row in self.annual_demands}, ensure_ascii=False)
 
-class Upload(Base):
-    __tablename__ = "uploads"
+
+class AnnualDemand(Base):
+    __tablename__ = "annual_demand"
     id: Mapped[int] = mapped_column(primary_key=True)
-    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id"))
-    filename: Mapped[str] = mapped_column(String(500))
-    stored_name: Mapped[str] = mapped_column(String(500))
-    contract: Mapped[Contract] = relationship(back_populates="uploads")
+    order_item_id: Mapped[int] = mapped_column(ForeignKey("order_item.id", ondelete="CASCADE"))
+    year: Mapped[int] = mapped_column(Integer)
+    quantity: Mapped[int] = mapped_column(Integer)
+    order_item: Mapped[OrderItem] = relationship(back_populates="annual_demands")
+
+
+class Document(Base):
+    __tablename__ = "document"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contract.id", ondelete="SET NULL"), nullable=True)
+    type: Mapped[str] = mapped_column(String(50))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(30), default="DRAFT")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contract: Mapped[Contract | None] = relationship(back_populates="documents")
+    @property
+    def stored_name(self): return self.file_id or ""
+    @property
+    def filename(self):
+        value = self.file_id or ""
+        return value.split("-", 1)[1] if "-" in value else Path(value).name
