@@ -1,11 +1,7 @@
 from datetime import date
-from sqlalchemy import create_engine, String, ForeignKey, Text, Date
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
-
-engine = create_engine("sqlite:///data/app.db", connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False)
-
-class Base(DeclarativeBase): pass
+from sqlalchemy import String, ForeignKey, Text, Date
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from .base import Base
 
 class Organization(Base):
     __tablename__ = "organizations"

@@ -1,9 +1,30 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kadry
+      POSTGRES_USER: kadry
+      POSTGRES_PASSWORD: kadry
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kadry -d kadry"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   app:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://kadry:kadry@db:5432/kadry
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
       - ./templates:/app/templates
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  postgres_data:
