@@ -32,7 +32,7 @@ def import_xlsx(path, db):
             contract = Contract(organization_id=org.id, faculty=faculty, number=number, status=text(field(row, "Статус")) or "Активен", start_date=parse_date(field(row, "Дата начала договора")), end_date=parse_date(field(row, "Дата окончания договора")))
             db.add(contract); db.flush()
         demand = {str(year): (row[i] or 0) for year, i in years}
-        specialty = text(field(row, "Код специальности, направления специальности, специализации "))
+        specialty = text(field(row, "Код специальности, направления специальности, специализации"))
         qualification = text(field(row, "Квалификация"))
         if specialty and not db.query(OrderItem).filter_by(contract_id=contract.id, specialty=specialty, qualification=qualification).first():
             db.add(OrderItem(contract_id=contract.id, specialty=specialty, qualification=qualification, demand_json=json.dumps(demand, ensure_ascii=False)))
