@@ -1,0 +1,4 @@
+td input{min-width:70px;padding:6px;border-color:transparent;background:transparent}
+td input:focus{background:#fff;border-color:#b9d6f9}
+.quantity{width:45px!important;min-width:42px!important;text-align:center}
+.itemform .quantity{flex:0 0 55px}

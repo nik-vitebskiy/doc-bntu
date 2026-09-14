@@ -1,0 +1,8 @@
+data/*
+!data/.gitkeep
+uploads/*
+!uploads/.gitkeep
+templates/dop_soglashenie.docx
+__pycache__/
+docx_inspect/
+xlsx_inspect/
