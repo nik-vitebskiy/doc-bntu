@@ -6,10 +6,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Faculty
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement
-from .services.organization_service import attach_scan, create_contract, create_organization, register_additional_agreement, registry as get_registry, save_item
+from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, register_additional_agreement, registry as get_registry, save_item
 from .services.auth_service import authenticate, ensure_admin, ensure_head, write_audit
 from .template_builder import make_template
 
@@ -109,6 +109,13 @@ def add_additional_agreement(request: Request, contract_id: int, number: str = F
     agreement = register_additional_agreement(s, contract, number, date.fromisoformat(agreement_date), request.state.user.id)
     write_audit(s, request.state.user.id, "ACTIVATE", "additional_agreement", agreement.id, f"{agreement.number}; contract={contract.id}")
     return RedirectResponse(f"/organizations/{contract.organization_id}", status_code=303)
+
+@app.get("/additional-agreements/{agreement_id}/comparison", response_class=HTMLResponse)
+def agreement_comparison(request: Request, agreement_id: int):
+    s = db(); agreement = s.get(AdditionalAgreement, agreement_id)
+    if not agreement: raise HTTPException(404)
+    rows, years = compare_agreement_order(s, agreement)
+    return views.TemplateResponse(request, "agreement_comparison.html", {"agreement": agreement, "rows": rows, "years": years})
 
 @app.post("/contracts/{contract_id}/items")
 async def add_item(contract_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
