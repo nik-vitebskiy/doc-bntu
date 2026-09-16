@@ -20,6 +20,14 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 views = Jinja2Templates(directory="app/views")
 views.env.filters["fromjson"] = json.loads
 
+
+def document_status(value: str | None) -> str:
+    """Translate legacy database codes without changing their historical values."""
+    return {"ACTIVE": "Активен", "CLOSED": "Закрыт"}.get(value or "", value or "—")
+
+
+views.env.filters["document_status"] = document_status
+
 def db(): return SessionLocal()
 def urgency(end):
     if not end: return "neutral"
@@ -95,10 +103,10 @@ def organization(request: Request, org_id: int):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
     years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
-    return views.TemplateResponse(request, "organization.html", {"org": org, "years": years})
+    return views.TemplateResponse(request, "organization.html", {"org": org, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all()})
 
 @app.post("/organizations/{org_id}/contract")
-def add_contract(org_id: int, faculty: str = Form(...), number: str = Form(""), end_date: str = Form("")):
+def add_contract(org_id: int, faculty: list[str] = Form(...), number: str = Form(""), end_date: str = Form("")):
     s = db(); create_contract(s, org_id, faculty, number, end_date)
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
