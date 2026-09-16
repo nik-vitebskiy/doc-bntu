@@ -21,7 +21,17 @@ def upgrade():
             PRIMARY KEY (contract_id, faculty_id)
         )
     """)
-    op.execute("INSERT INTO contract_faculty(contract_id, faculty_id) SELECT id, faculty_id FROM contract ON CONFLICT DO NOTHING")
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'contract' AND column_name = 'faculty_id'
+            ) THEN
+                INSERT INTO contract_faculty(contract_id, faculty_id)
+                SELECT id, faculty_id FROM contract ON CONFLICT DO NOTHING;
+            END IF;
+        END $$;
+    """)
 
     op.execute("""
         CREATE TABLE IF NOT EXISTS application (

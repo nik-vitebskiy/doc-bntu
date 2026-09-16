@@ -23,7 +23,6 @@ class Faculty(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True)
     code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
-    contracts: Mapped[list["Contract"]] = relationship(back_populates="faculty")
 
 
 class Organization(Base):
@@ -48,24 +47,34 @@ class Contract(Base):
     __tablename__ = "contract"
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
-    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculty.id"))
     number: Mapped[str] = mapped_column(String(100))
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+    status: Mapped[str] = mapped_column(String(30), default="Активен")
     organization: Mapped[Organization] = relationship(back_populates="contracts")
-    faculty: Mapped[Faculty] = relationship(back_populates="contracts")
     orders: Mapped[list["Order"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
     agreements: Mapped[list["AdditionalAgreement"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="contract")
-    @property
-    def faculty_name(self): return self.faculty.name
+    faculty_links: Mapped[list["ContractFaculty"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
     @property
     def items(self): return [item for order in self.orders if order.is_current for item in order.items]
     @property
     def specialty_codes(self): return list(dict.fromkeys(item.specialty for item in self.items))
     @property
+    def faculty_names(self): return [link.faculty.name for link in self.faculty_links]
+    @property
     def uploads(self): return [doc for doc in self.documents if doc.type == "SIGNED_SCAN"]
+    @property
+    def active_agreement(self):
+        return next((agreement for agreement in self.agreements if agreement.status == "Активен"), None)
+
+
+class ContractFaculty(Base):
+    __tablename__ = "contract_faculty"
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contract.id", ondelete="CASCADE"), primary_key=True)
+    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculty.id"), primary_key=True)
+    contract: Mapped[Contract] = relationship(back_populates="faculty_links")
+    faculty: Mapped[Faculty] = relationship()
 
 
 class AdditionalAgreement(Base):
