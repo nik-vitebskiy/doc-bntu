@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import extract, func, or_
 
-from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, Document, Faculty, Order, OrderItem, Organization, Specialty
+from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, ContractFaculty, Document, Faculty, Order, OrderItem, Organization, Specialty
 
 
 def get_or_create_faculty(session, name):
@@ -46,7 +46,7 @@ def get_or_create_specialty(session, code, qualification="", faculty=""):
 
 
 def registry(session, query_text="", faculty="", end_year=""):
-    query = session.query(Contract).join(Organization).join(Faculty).outerjoin(Order, Order.contract_id == Contract.id).outerjoin(OrderItem).outerjoin(Specialty)
+    query = session.query(Contract).join(Organization).join(ContractFaculty, ContractFaculty.contract_id == Contract.id).join(Faculty, Faculty.id == ContractFaculty.faculty_id).outerjoin(Order, Order.contract_id == Contract.id).outerjoin(OrderItem).outerjoin(Specialty)
     if query_text:
         query = query.filter(or_(Organization.short_name.ilike(f"%{query_text}%"), Contract.number.ilike(f"%{query_text}%"), Specialty.code.ilike(f"%{query_text}%")))
     if faculty:
@@ -55,7 +55,7 @@ def registry(session, query_text="", faculty="", end_year=""):
         query = query.filter(extract("year", Contract.end_date) == int(end_year))
     contracts = query.distinct().order_by(Contract.id).all()
     faculties = [row[0] for row in session.query(Faculty.name).order_by(Faculty.name)]
-    counts = dict(session.query(Faculty.name, func.count(Contract.id)).join(Contract).group_by(Faculty.name).all())
+    counts = dict(session.query(Faculty.name, func.count(ContractFaculty.contract_id)).join(ContractFaculty).group_by(Faculty.name).all())
     end_years = [row[0] for row in session.query(extract("year", Contract.end_date)).filter(Contract.end_date.is_not(None)).distinct().order_by(extract("year", Contract.end_date))]
     return contracts, faculties, counts, end_years
 
@@ -71,11 +71,18 @@ def create_organization(session, **values):
     return org
 
 
-def create_contract(session, organization_id, faculty, number, end_date):
-    contract = Contract(organization_id=organization_id, faculty_id=get_or_create_faculty(session, faculty).id,
-                        number=number or "Без номера", start_date=date.today(),
-                        end_date=date.fromisoformat(end_date) if end_date else None)
+def create_contract(session, organization_id, faculties, number, end_date):
+    names = faculties if isinstance(faculties, list) else [faculties]
+    selected = [get_or_create_faculty(session, name) for name in names if name.strip()]
+    if not selected:
+        selected = [get_or_create_faculty(session, "Не указан")]
+    contract = Contract(organization_id=organization_id, number=number or "Без номера", start_date=date.today(),
+                        end_date=date.fromisoformat(end_date) if end_date else None,
+                        status="Активен")
     session.add(contract)
+    session.flush()
+    for faculty in selected:
+        session.add(ContractFaculty(contract_id=contract.id, faculty_id=faculty.id))
     session.commit()
     return contract
 
@@ -84,7 +91,7 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
     values = {int(key.removeprefix("demand_")): int(value) if str(value).strip().isdigit() else 0
               for key, value in form_data.items() if key.startswith("demand_")}
     contract = session.get(Contract, contract_id)
-    specialty_ref = get_or_create_specialty(session, specialty, qualification, contract.faculty.name)
+    specialty_ref = get_or_create_specialty(session, specialty, qualification, ", ".join(contract.faculty_names))
     item = item or OrderItem(order_id=get_or_create_order(session, contract).id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
     for year, quantity in values.items():
