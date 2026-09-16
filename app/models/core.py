@@ -11,8 +11,11 @@ class AppUser(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(100), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str] = mapped_column(String(30), default="SYSTEM")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Faculty(Base):
@@ -33,7 +36,6 @@ class Organization(Base):
     authority: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contracts: Mapped[list["Contract"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
-    representatives: Mapped[list["OrganizationRepresentative"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     @property
     def name(self): return self.short_name
     @property
@@ -42,21 +44,6 @@ class Organization(Base):
     def department(self): return self.authority
     @property
     def phones(self): return self.phone
-    @property
-    def contact(self): return self.representatives[0].full_name if self.representatives else ""
-
-
-class OrganizationRepresentative(Base):
-    __tablename__ = "organization_representative"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
-    full_name: Mapped[str] = mapped_column(String(255))
-    position: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    authority_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
-    organization: Mapped[Organization] = relationship(back_populates="representatives")
-
-
 class Contract(Base):
     __tablename__ = "contract"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -69,13 +56,29 @@ class Contract(Base):
     organization: Mapped[Organization] = relationship(back_populates="contracts")
     faculty: Mapped[Faculty] = relationship(back_populates="contracts")
     orders: Mapped[list["Order"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
+    agreements: Mapped[list["AdditionalAgreement"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="contract")
     @property
     def faculty_name(self): return self.faculty.name
     @property
-    def items(self): return [item for order in self.orders for item in order.items]
+    def items(self): return [item for order in self.orders if order.is_current for item in order.items]
+    @property
+    def specialty_codes(self): return list(dict.fromkeys(item.specialty for item in self.items))
     @property
     def uploads(self): return [doc for doc in self.documents if doc.type == "SIGNED_SCAN"]
+
+
+class AdditionalAgreement(Base):
+    __tablename__ = "additional_agreement"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contract.id", ondelete="CASCADE"))
+    number: Mapped[str] = mapped_column(String(100))
+    date: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(30), default="Активен")
+    previous_agreement_id: Mapped[int | None] = mapped_column(ForeignKey("additional_agreement.id"), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    contract: Mapped[Contract] = relationship(back_populates="agreements")
+    orders: Mapped[list["Order"]] = relationship(back_populates="additional_agreement")
 
 
 class Specialty(Base):
@@ -92,10 +95,16 @@ class Order(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contract.id", ondelete="SET NULL"), nullable=True)
+    additional_agreement_id: Mapped[int | None] = mapped_column(ForeignKey("additional_agreement.id", ondelete="SET NULL"), nullable=True)
+    application_id: Mapped[int | None] = mapped_column(nullable=True)
+    previous_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(30), default="DRAFT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
     contract: Mapped[Contract | None] = relationship(back_populates="orders")
+    additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
 
 
@@ -104,6 +113,8 @@ class OrderItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
     specialty_id: Mapped[int] = mapped_column(ForeignKey("specialty.id"))
+    qualification_value: Mapped[str | None] = mapped_column("qualification", String(255), nullable=True)
+    profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
     order: Mapped[Order] = relationship(back_populates="items")
     specialty_ref: Mapped[Specialty] = relationship()
     annual_demands: Mapped[list["AnnualDemand"]] = relationship(back_populates="order_item", cascade="all, delete-orphan")
@@ -114,7 +125,7 @@ class OrderItem(Base):
     @property
     def specialty(self): return self.specialty_ref.code
     @property
-    def qualification(self): return self.specialty_ref.qualification or ""
+    def qualification(self): return self.qualification_value or self.specialty_ref.qualification or ""
     @property
     def demand_json(self): return json.dumps({str(row.year): row.quantity for row in self.annual_demands}, ensure_ascii=False)
 
@@ -145,3 +156,14 @@ class Document(Base):
     def filename(self):
         value = self.file_id or ""
         return value.split("-", 1)[1] if "-" in value else Path(value).name
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True)
+    action: Mapped[str] = mapped_column(String(100))
+    entity_type: Mapped[str] = mapped_column(String(50))
+    entity_id: Mapped[int | None] = mapped_column(nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import func, or_
+from sqlalchemy import extract, func, or_
 
-from ..models import AnnualDemand, AppUser, Contract, Document, Faculty, Order, OrderItem, Organization, Specialty
+from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, Document, Faculty, Order, OrderItem, Organization, Specialty
 
 
 def get_or_create_faculty(session, name):
@@ -45,16 +45,19 @@ def get_or_create_specialty(session, code, qualification="", faculty=""):
     return specialty
 
 
-def registry(session, query_text="", faculty=""):
-    query = session.query(Contract).join(Organization).join(Faculty)
+def registry(session, query_text="", faculty="", end_year=""):
+    query = session.query(Contract).join(Organization).join(Faculty).outerjoin(Order, Order.contract_id == Contract.id).outerjoin(OrderItem).outerjoin(Specialty)
     if query_text:
-        query = query.filter(or_(Organization.short_name.ilike(f"%{query_text}%"), Contract.number.ilike(f"%{query_text}%")))
+        query = query.filter(or_(Organization.short_name.ilike(f"%{query_text}%"), Contract.number.ilike(f"%{query_text}%"), Specialty.code.ilike(f"%{query_text}%")))
     if faculty:
         query = query.filter(Faculty.name == faculty)
-    contracts = query.order_by(Organization.short_name).all()
+    if end_year and end_year.isdigit():
+        query = query.filter(extract("year", Contract.end_date) == int(end_year))
+    contracts = query.distinct().order_by(Contract.id).all()
     faculties = [row[0] for row in session.query(Faculty.name).order_by(Faculty.name)]
     counts = dict(session.query(Faculty.name, func.count(Contract.id)).join(Contract).group_by(Faculty.name).all())
-    return contracts, faculties, counts
+    end_years = [row[0] for row in session.query(extract("year", Contract.end_date)).filter(Contract.end_date.is_not(None)).distinct().order_by(extract("year", Contract.end_date))]
+    return contracts, faculties, counts, end_years
 
 
 def create_organization(session, **values):
@@ -99,3 +102,36 @@ def attach_scan(session, contract, filename, stored_name):
     session.add(Document(organization_id=contract.organization_id, contract_id=contract.id,
                          type="SIGNED_SCAN", status="SIGNED", file_id=stored_name))
     session.commit()
+
+
+def register_additional_agreement(session, contract: Contract, number: str, agreement_date: date, user_id: int) -> AdditionalAgreement:
+    """Copy the effective order, activate the new agreement and close its predecessor."""
+    source_order = session.query(Order).filter_by(contract_id=contract.id, is_current=True).order_by(Order.revision.desc()).first()
+    if not source_order:
+        source_order = get_or_create_order(session, contract)
+    previous_agreement = session.query(AdditionalAgreement).filter_by(contract_id=contract.id, status="Активен").order_by(AdditionalAgreement.id.desc()).first()
+    agreement = AdditionalAgreement(contract_id=contract.id, number=number, date=agreement_date, status="Активен",
+                                    previous_agreement_id=previous_agreement.id if previous_agreement else None,
+                                    activated_at=datetime.now(timezone.utc))
+    session.add(agreement)
+    session.flush()
+
+    if previous_agreement:
+        previous_agreement.status = "Закрыт"
+    else:
+        contract.status = "Закрыт"
+    source_order.is_current = False
+    copied = Order(organization_id=contract.organization_id, contract_id=contract.id, additional_agreement_id=agreement.id,
+                   status="CURRENT", created_by=user_id, previous_order_id=source_order.id,
+                   revision=source_order.revision + 1, is_current=True)
+    session.add(copied)
+    session.flush()
+    for source_item in source_order.items:
+        item = OrderItem(order_id=copied.id, specialty_id=source_item.specialty_id,
+                         qualification_value=source_item.qualification_value, profile=source_item.profile)
+        session.add(item)
+        session.flush()
+        for demand in source_item.annual_demands:
+            session.add(AnnualDemand(order_item_id=item.id, year=demand.year, quantity=demand.quantity))
+    session.commit()
+    return agreement

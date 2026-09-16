@@ -1,4 +1,4 @@
 from .base import Base, SessionLocal, engine
-from .core import AnnualDemand, AppUser, Contract, Document, Faculty, Order, OrderItem, Organization, OrganizationRepresentative, Specialty
+from .core import AdditionalAgreement, AnnualDemand, AppUser, AuditLog, Contract, Document, Faculty, Order, OrderItem, Organization, Specialty
 
-__all__ = ["Base", "SessionLocal", "engine", "AppUser", "Faculty", "Organization", "OrganizationRepresentative", "Contract", "Specialty", "Order", "OrderItem", "AnnualDemand", "Document"]
+__all__ = ["Base", "SessionLocal", "engine", "AppUser", "AuditLog", "Faculty", "Organization", "Contract", "AdditionalAgreement", "Specialty", "Order", "OrderItem", "AnnualDemand", "Document"]
