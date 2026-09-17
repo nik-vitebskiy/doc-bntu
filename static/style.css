@@ -273,6 +273,13 @@ mark{
   font-size:10px;
   font-weight:bold
 }
+.status-active{background:#dff6e9;color:#178650}
+.status-closed{background:#edf0f3;color:#657180}
+.change-added{background:#d7f4e3;color:#117847}
+.change-updated{background:#e0efff;color:#1765b0}
+.change-unchanged{background:#edf0f3;color:#657180}
+.change-removed{background:#fbe5e7;color:#a13b47}
+.muted{color:#718096;font-size:13px}
 
 .date{
   padding:4px 7px;

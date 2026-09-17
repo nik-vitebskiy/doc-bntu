@@ -6,11 +6,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Faculty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, Faculty
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement
 from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, register_additional_agreement, registry as get_registry, save_item
 from .services.auth_service import authenticate, ensure_admin, ensure_head, write_audit
+from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
+from .services.status_service import APPLICATION_STATUSES, order_change_class, status_class, status_label
 from .template_builder import make_template
 
 Path("data").mkdir(exist_ok=True); Path("uploads").mkdir(exist_ok=True)
@@ -21,12 +23,24 @@ views = Jinja2Templates(directory="app/views")
 views.env.filters["fromjson"] = json.loads
 
 
-def document_status(value: str | None) -> str:
-    """Translate legacy database codes without changing their historical values."""
-    return {"ACTIVE": "Активен", "CLOSED": "Закрыт"}.get(value or "", value or "—")
+views.env.filters["document_status"] = status_label
+views.env.filters["status_class"] = status_class
+views.env.filters["order_change_class"] = order_change_class
 
 
-views.env.filters["document_status"] = document_status
+def nav_is_active(request: Request, section: str) -> bool:
+    """Keep sidebar selection correct for list and nested resource routes."""
+    path = request.url.path
+    prefixes = {
+        "organizations": ("/organizations",),
+        "applications": ("/applications",),
+        "contracts": ("/contracts", "/additional-agreements"),
+        "documents": ("/documents",),
+    }
+    return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
+
+
+views.env.globals["nav_is_active"] = nav_is_active
 
 def db(): return SessionLocal()
 def urgency(end):
@@ -81,6 +95,65 @@ def registry(request: Request, q: str = "", faculty: str = "", end_year: str = "
     s = db()
     contracts, faculties, counts, end_years = get_registry(s, q, faculty, end_year)
     return views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "counts": counts, "q": q, "selected_faculty": faculty, "end_years": end_years, "selected_end_year": end_year})
+
+@app.get("/applications", response_class=HTMLResponse)
+def applications(request: Request, q: str = "", faculty: str = ""):
+    s = db(); rows, faculties = application_registry(s, q, faculty)
+    return views.TemplateResponse(request, "applications.html", {"applications": rows, "faculties": faculties, "q": q, "selected_faculty": faculty})
+
+@app.get("/organizations/{org_id}/applications/new", response_class=HTMLResponse)
+def new_application(request: Request, org_id: int):
+    s = db(); org = s.get(Organization, org_id)
+    if not org: raise HTTPException(404)
+    return views.TemplateResponse(request, "application_form.html", {"org": org, "faculties": s.query(Faculty).order_by(Faculty.name).all()})
+
+@app.post("/organizations/{org_id}/applications")
+def add_application(request: Request, org_id: int, faculty: list[str] = Form(...), received_date: str = Form(...), number: str = Form(""), signed_date: str = Form("")):
+    s = db(); application = create_application(s, org_id, faculty, received_date, number, signed_date, request.state.user.id)
+    write_audit(s, request.state.user.id, "CREATE", "application", application.id, f"Получена: {received_date}")
+    return RedirectResponse(f"/applications/{application.id}", status_code=303)
+
+@app.get("/applications/{application_id}", response_class=HTMLResponse)
+def application_card(request: Request, application_id: int):
+    s = db(); application = s.get(Application, application_id)
+    if not application: raise HTTPException(404)
+    years = list(range(date.today().year, date.today().year + 10))
+    return views.TemplateResponse(request, "application.html", {"application": application, "years": years, "statuses": APPLICATION_STATUSES})
+
+@app.post("/applications/{application_id}")
+def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form(""), status: str = Form(...)):
+    s = db(); application = s.get(Application, application_id)
+    if not application or status not in APPLICATION_STATUSES: raise HTTPException(404)
+    update_application(s, application, number, signed_date, status)
+    write_audit(s, request.state.user.id, "UPDATE", "application", application.id, f"Статус: {status}; номер: {number or '—'}")
+    return RedirectResponse(f"/applications/{application_id}", status_code=303)
+
+@app.post("/applications/{application_id}/items")
+async def add_application_item(request: Request, application_id: int, specialty: str = Form(...), qualification: str = Form("")):
+    s = db(); application = s.get(Application, application_id)
+    if not application: raise HTTPException(404)
+    save_application_item(s, application, specialty, qualification, await request.form())
+    write_audit(s, request.state.user.id, "CREATE", "application_item", application_id, specialty)
+    return RedirectResponse(f"/applications/{application_id}", status_code=303)
+
+@app.post("/application-items/{item_id}")
+async def edit_application_item(request: Request, item_id: int, specialty: str = Form(...), qualification: str = Form("")):
+    s = db(); item = s.get(OrderItem, item_id)
+    if not item or not item.order.application_id: raise HTTPException(404)
+    application = s.get(Application, item.order.application_id)
+    save_application_item(s, application, specialty, qualification, await request.form(), item)
+    write_audit(s, request.state.user.id, "UPDATE", "application_item", item.id, specialty)
+    return RedirectResponse(f"/applications/{application.id}", status_code=303)
+
+@app.post("/applications/{application_id}/scan")
+async def add_application_scan(request: Request, application_id: int, file: UploadFile = File(...)):
+    s = db(); application = s.get(Application, application_id)
+    if not application: raise HTTPException(404)
+    safe = Path(file.filename).name; stored = f"{uuid.uuid4()}-{safe}"
+    with open(Path("uploads") / stored, "wb") as out: shutil.copyfileobj(file.file, out)
+    attach_application_scan(s, application, stored)
+    write_audit(s, request.state.user.id, "UPLOAD", "application", application.id, safe)
+    return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/import")
 async def upload_import(file: UploadFile = File(...)):
