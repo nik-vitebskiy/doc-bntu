@@ -203,12 +203,15 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(30), default="DRAFT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    original_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
     contract: Mapped[Contract | None] = relationship(back_populates="documents")
     application: Mapped[Application | None] = relationship(back_populates="documents")
     @property
     def stored_name(self): return self.file_id or ""
     @property
     def filename(self):
+        if self.original_filename:
+            return self.original_filename
         value = self.file_id or ""
         return value.split("-", 1)[1] if "-" in value else Path(value).name
 

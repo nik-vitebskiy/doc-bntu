@@ -274,12 +274,49 @@ mark{
   font-weight:bold
 }
 .status-active{background:#dff6e9;color:#178650}
+.status-completed{background:#e8e6ff;color:#5b45b8}
 .status-closed{background:#edf0f3;color:#657180}
 .change-added{background:#d7f4e3;color:#117847}
 .change-updated{background:#e0efff;color:#1765b0}
 .change-unchanged{background:#edf0f3;color:#657180}
 .change-removed{background:#fbe5e7;color:#a13b47}
 .muted{color:#718096;font-size:13px}
+
+.status-actions,.contract-actions,.dialog-actions{
+  display:flex;
+  align-items:center;
+  gap:10px
+}
+
+.button.compact{
+  min-height:auto;
+  padding:6px 10px;
+  font-size:12px
+}
+
+.link-button{
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#1769dc;
+  font:inherit;
+  cursor:pointer
+}
+
+.status-dialog{
+  width:min(480px, calc(100vw - 32px));
+  border:0;
+  border-radius:10px;
+  padding:24px;
+  box-shadow:0 20px 60px rgba(30,45,70,.28)
+}
+
+.status-dialog::backdrop{background:rgba(24,37,58,.38)}
+.status-dialog form{display:grid;gap:14px}
+.status-dialog label{display:grid;gap:6px;color:#4e5d74;font-weight:600}
+.status-dialog textarea{resize:vertical}
+.status-dialog .dialog-actions{justify-content:flex-end}
+.status-error{min-height:18px;margin:0;color:#b42332;font-size:13px}
 
 .date{
   padding:4px 7px;

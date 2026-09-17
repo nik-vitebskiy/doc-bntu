@@ -15,8 +15,10 @@ from ..models import (
     AppSetting,
     AppUser,
     Application,
+    ApplicationFaculty,
     AuditLog,
     Contract,
+    ContractFaculty,
     Document,
     Faculty,
     Order,
@@ -100,10 +102,14 @@ def entity_label(entity: Any) -> str:
             return f"Организация {entity.short_name}"
         if isinstance(entity, Contract):
             return f"Договор {entity.number}"
+        if isinstance(entity, ContractFaculty):
+            return f"Факультет {entity.faculty_id} договора {entity.contract_id}"
         if isinstance(entity, AdditionalAgreement):
             return f"Доп. соглашение №{entity.number}"
         if isinstance(entity, Application):
             return f"Заявка {entity.number or 'без номера'}"
+        if isinstance(entity, ApplicationFaculty):
+            return f"Факультет {entity.faculty_id} заявки {entity.application_id}"
         if isinstance(entity, Order):
             return _order_label(entity)
         if isinstance(entity, OrderItem):
@@ -126,13 +132,24 @@ def entity_label(entity: Any) -> str:
         # fallback still leaves an immutable and identifiable audit record.
         pass
     entity_type = getattr(entity, "__tablename__", entity.__class__.__name__.lower())
-    identifier = getattr(entity, "id", None)
+    identifier = _entity_identifier(entity)
     return f"{entity_type}/{identifier}" if identifier is not None else entity_type
 
 
 def _entity_type(entity: Any) -> str:
     value = getattr(entity, "__tablename__", entity.__class__.__name__.lower())
     return "order" if value == "orders" else value
+
+
+def _entity_identifier(entity: Any) -> int | None:
+    identifier = getattr(entity, "id", None)
+    if identifier is not None:
+        return identifier
+    if isinstance(entity, ContractFaculty):
+        return entity.contract_id
+    if isinstance(entity, ApplicationFaculty):
+        return entity.application_id
+    return None
 
 
 class AuditBatch:
@@ -197,7 +214,7 @@ class AuditBatch:
             action=action,
             entity=entity,
             entity_type=_entity_type(entity),
-            entity_id=getattr(entity, "id", None),
+            entity_id=_entity_identifier(entity),
             entity_label=label,
             old=old,
             new=new,
@@ -303,6 +320,7 @@ class AuditBatch:
                     action=action,
                     entity=entity,
                     entity_type=_entity_type(entity),
+                    entity_label=entity_label(entity),
                     old=serialize_entity(entity),
                     new={},
                     comment=self.comment,
@@ -347,7 +365,7 @@ class AuditBatch:
     def _persist_events(self) -> None:
         for sequence, event in enumerate(self.events, start=1):
             if event.entity is not None:
-                event.entity_id = getattr(event.entity, "id", event.entity_id)
+                event.entity_id = _entity_identifier(event.entity) or event.entity_id
                 event.entity_label = event.entity_label or entity_label(event.entity)
                 if event.action in {AuditAction.CREATE, AuditAction.FILE_UPLOAD} and event.new is None:
                     event.old = {}
