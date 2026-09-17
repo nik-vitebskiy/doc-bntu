@@ -54,5 +54,14 @@ def authenticate(session, username: str, password: str) -> AppUser | None:
 
 
 def write_audit(session, user_id: int | None, action: str, entity_type: str, entity_id: int | None = None, details: str | None = None):
-    session.add(AuditLog(user_id=user_id, action=action, entity_type=entity_type, entity_id=entity_id, details=details))
+    session.add(AuditLog(
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        entity_label=f"{entity_type}/{entity_id}" if entity_id is not None else entity_type,
+        diff={"old": {}, "new": {}},
+        comment=details,
+        sequence=1,
+    ))
     session.commit()
