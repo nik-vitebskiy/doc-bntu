@@ -1,4 +1,166 @@
-td input{min-width:70px;padding:6px;border-color:transparent;background:transparent}
-td input:focus{background:#fff;border-color:#b9d6f9}
-.quantity{width:45px!important;min-width:42px!important;text-align:center}
-.itemform .quantity{flex:0 0 55px}
+td input{
+  min-width:70px;
+  padding:6px;
+  border-color:transparent;
+  background:transparent
+}
+
+td input:focus{
+  background:#fff;
+  border-color:#b9d6f9
+}
+
+.quantity{
+  width:45px !important;
+  min-width:42px !important;
+  text-align:center
+}
+
+.itemform .quantity{
+  flex:0 0 55px
+}
+
+.faculty-picker{
+  position:relative;
+  width:270px;
+  flex:0 0 270px
+}
+
+.field-label{
+  display:block;
+  font-weight:600;
+  color:#4e5d74;
+  margin-bottom:6px
+}
+
+.faculty-multiselect{
+  position:relative;
+  color:#31405a
+}
+
+.faculty-multiselect summary{
+  height:42px;
+  border:1px solid #d9e3f0;
+  border-radius:7px;
+  background:#fff;
+  color:#44546c;
+  padding:10px 12px;
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) 18px;
+  align-items:center;
+  gap:8px;
+  cursor:pointer;
+  list-style:none
+}
+
+.faculty-multiselect summary::-webkit-details-marker{
+  display:none
+}
+
+.faculty-summary{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.faculty-multiselect[open] summary{
+  border-color:#75a9ee;
+  box-shadow:0 0 0 3px #eaf3ff
+}
+
+.chevron{
+  text-align:center;
+  font-size:16px;
+  line-height:1;
+  color:#6f7f95;
+  transition:transform .15s ease
+}
+
+.faculty-multiselect[open] .chevron{
+  transform:rotate(180deg)
+}
+
+.faculty-menu{
+  position:absolute;
+  z-index:20;
+  top:48px;
+  left:0;
+  width:360px;
+  padding:10px;
+  background:#fff;
+  border:1px solid #d9e3f0;
+  border-radius:8px;
+  box-shadow:0 14px 34px rgba(42,62,90,.18)
+}
+
+.faculty-menu .faculty-search{
+  display:block;
+  width:100%;
+  margin:0 0 8px;
+  padding:9px 10px
+}
+
+.faculty-options{
+  max-height:245px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding:2px
+}
+
+.faculty-options label{
+  display:grid;
+  grid-template-columns:18px minmax(0, 1fr);
+  column-gap:9px;
+  align-items:start;
+  width:100%;
+  padding:8px 7px;
+  cursor:pointer;
+  color:#31405a;
+  border-radius:5px
+}
+
+.faculty-options label:hover{
+  background:#f1f7ff
+}
+
+.faculty-options input[type="checkbox"]{
+  appearance:auto;
+  width:16px !important;
+  min-width:16px !important;
+  height:16px;
+  margin:1px 0 0;
+  padding:0;
+  accent-color:#1268dc
+}
+
+.faculty-options span{
+  display:block;
+  min-width:0;
+  line-height:18px;
+  overflow-wrap:anywhere
+}
+
+.faculty-options label[hidden]{
+  display:none
+}
+
+.card .inlineform{
+  align-items:flex-end
+}
+
+.card .inlineform > input,
+.card .inlineform > button,
+.faculty-multiselect summary{
+  height:42px
+}
+
+@media(max-width:700px){
+  .faculty-picker{
+    width:100%;
+    flex-basis:100%
+  }
+
+  .faculty-menu{
+    width:min(360px, calc(100vw - 64px))
+  }
+}

@@ -142,3 +142,37 @@ def register_additional_agreement(session, contract: Contract, number: str, agre
             session.add(AnnualDemand(order_item_id=item.id, year=demand.year, quantity=demand.quantity))
     session.commit()
     return agreement
+
+
+def compare_agreement_order(session, agreement: AdditionalAgreement):
+    """Return a human-readable difference between an agreement's order and its predecessor."""
+    current = next(iter(agreement.orders), None)
+    if not current or not current.previous_order_id:
+        return [], []
+    previous = session.get(Order, current.previous_order_id)
+    years = sorted({demand.year for order in (previous, current) for item in order.items for demand in item.annual_demands})
+
+    def values(order):
+        return {
+            item.specialty: {
+                "qualification": item.qualification,
+                "profile": item.profile or "",
+                "demand": {demand.year: demand.quantity for demand in item.annual_demands},
+            }
+            for item in order.items
+        }
+
+    before, after = values(previous), values(current)
+    rows = []
+    for specialty in sorted(set(before) | set(after)):
+        old, new = before.get(specialty), after.get(specialty)
+        if old is None:
+            change = "Добавлено"
+        elif new is None:
+            change = "Исключено"
+        elif old != new:
+            change = "Изменено"
+        else:
+            change = "Без изменений"
+        rows.append({"specialty": specialty, "before": old, "after": new, "change": change})
+    return rows, years
