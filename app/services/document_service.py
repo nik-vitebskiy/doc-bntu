@@ -1,6 +1,19 @@
 import json
+from pathlib import Path
 
 from docxtpl import DocxTemplate
+
+
+APPLICATION_TEMPLATE_PATH = Path("templates/zayavka.docx")
+
+
+def application_template_ready() -> bool:
+    """Return whether the customer-approved application template is available.
+
+    Rendering is deliberately not exposed until that template is supplied: the
+    application form is a regulated document and must not be guessed.
+    """
+    return APPLICATION_TEMPLATE_PATH.is_file()
 
 
 def render_agreement(contract, out_path):
