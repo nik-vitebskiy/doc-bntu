@@ -5,7 +5,6 @@ from .status_service import (
     CONTRACT_STATUSES,
     STATUS_ACTIVE,
     STATUS_APPLICATION,
-    STATUS_APPLICATION_COMPLETED,
     STATUS_CLOSED,
 )
 
@@ -19,16 +18,16 @@ def allowed_status_transitions(document_type: str, current_status: str, role: st
         return tuple(status for status in CONTRACT_STATUSES if status != current_status)
     if document_type == "application":
         if current_status == STATUS_APPLICATION:
-            return (STATUS_APPLICATION_COMPLETED, STATUS_CLOSED)
-        if role == "ADMIN" and current_status in {STATUS_APPLICATION_COMPLETED, STATUS_CLOSED}:
+            return (STATUS_CLOSED,)
+        if role == "ADMIN" and current_status == STATUS_CLOSED:
             return (STATUS_APPLICATION,)
     return ()
 
 
 def _validate_comment(target_status: str, current_status: str, role: str, comment: str) -> str:
     value = comment.strip()
-    reverse_application = current_status in {STATUS_APPLICATION_COMPLETED, STATUS_CLOSED} and target_status == STATUS_APPLICATION
-    if target_status in {STATUS_CLOSED, STATUS_APPLICATION_COMPLETED} and not value:
+    reverse_application = current_status == STATUS_CLOSED and target_status == STATUS_APPLICATION
+    if target_status == STATUS_CLOSED and not value:
         raise StatusTransitionError("При закрытии документа необходимо указать комментарий.")
     if reverse_application and role == "ADMIN" and not value:
         raise StatusTransitionError("Для обратного перехода необходимо указать комментарий.")

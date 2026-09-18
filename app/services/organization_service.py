@@ -95,15 +95,27 @@ def create_contract(session, organization_id, faculties, number, end_date):
     session.add(contract)
     session.flush()
     for faculty in selected:
-        session.add(ContractFaculty(contract_id=contract.id, faculty_id=faculty.id))
+        session.add(ContractFaculty(contract=contract, faculty=faculty))
     return contract
 
 
 @audited
-def update_contract(session, contract: Contract, number: str, start_date: str, end_date: str):
+def update_contract(session, contract: Contract, number: str, start_date: str, end_date: str, faculties):
     contract.number = number.strip() or "Без номера"
     contract.start_date = date.fromisoformat(start_date)
     contract.end_date = date.fromisoformat(end_date) if end_date else None
+    names = {name.strip() for name in faculties if name.strip()}
+    selected = session.query(Faculty).filter(Faculty.name.in_(names)).all()
+    if len(selected) != len(names):
+        raise ValueError("Выбран неизвестный факультет.")
+    selected_ids = {faculty.id for faculty in selected}
+    existing = {link.faculty_id: link for link in contract.faculty_links}
+    for faculty in selected:
+        if faculty.id not in existing:
+            session.add(ContractFaculty(contract=contract, faculty=faculty))
+    for faculty_id, link in existing.items():
+        if faculty_id not in selected_ids:
+            session.delete(link)
     return contract
 
 

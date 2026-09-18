@@ -7,7 +7,7 @@ from functools import wraps
 from typing import Any, Callable
 
 from sqlalchemy import event as sqlalchemy_event, inspect
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ..models import (
     AdditionalAgreement,
@@ -103,13 +103,17 @@ def entity_label(entity: Any) -> str:
         if isinstance(entity, Contract):
             return f"Договор {entity.number}"
         if isinstance(entity, ContractFaculty):
-            return f"Факультет {entity.faculty_id} договора {entity.contract_id}"
+            session = object_session(entity)
+            faculty = entity.faculty or (session.get(Faculty, entity.faculty_id) if session else None)
+            return faculty.name if faculty else f"Факультет {entity.faculty_id}"
         if isinstance(entity, AdditionalAgreement):
             return f"Доп. соглашение №{entity.number}"
         if isinstance(entity, Application):
             return f"Заявка {entity.number or 'без номера'}"
         if isinstance(entity, ApplicationFaculty):
-            return f"Факультет {entity.faculty_id} заявки {entity.application_id}"
+            session = object_session(entity)
+            faculty = entity.faculty or (session.get(Faculty, entity.faculty_id) if session else None)
+            return faculty.name if faculty else f"Факультет {entity.faculty_id}"
         if isinstance(entity, Order):
             return _order_label(entity)
         if isinstance(entity, OrderItem):
@@ -131,12 +135,14 @@ def entity_label(entity: Any) -> str:
         # A deleted object's lazy relationship may no longer be available. The
         # fallback still leaves an immutable and identifiable audit record.
         pass
-    entity_type = getattr(entity, "__tablename__", entity.__class__.__name__.lower())
+    entity_type = _entity_type(entity)
     identifier = _entity_identifier(entity)
     return f"{entity_type}/{identifier}" if identifier is not None else entity_type
 
 
 def _entity_type(entity: Any) -> str:
+    if isinstance(entity, (ContractFaculty, ApplicationFaculty)):
+        return "faculty"
     value = getattr(entity, "__tablename__", entity.__class__.__name__.lower())
     return "order" if value == "orders" else value
 
@@ -145,10 +151,8 @@ def _entity_identifier(entity: Any) -> int | None:
     identifier = getattr(entity, "id", None)
     if identifier is not None:
         return identifier
-    if isinstance(entity, ContractFaculty):
-        return entity.contract_id
-    if isinstance(entity, ApplicationFaculty):
-        return entity.application_id
+    if isinstance(entity, (ContractFaculty, ApplicationFaculty)):
+        return entity.faculty_id
     return None
 
 

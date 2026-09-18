@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const reverseApplication = form.dataset.documentType === 'application'
         && form.dataset.currentStatus !== 'Заявка'
         && select.value === 'Заявка';
-      comment.required = ['Закрыт', 'Закрыта заявка'].includes(select.value) || reverseApplication;
+      comment.required = select.value === 'Закрыт' || reverseApplication;
     };
     select.addEventListener('change', refreshRequired);
     refreshRequired();

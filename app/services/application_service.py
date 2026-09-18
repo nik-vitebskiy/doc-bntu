@@ -26,7 +26,7 @@ def create_application(session, organization_id, faculties, received_date, numbe
                               status="Заявка", created_by=user_id)
     session.add(application); session.flush()
     for faculty in selected:
-        session.add(ApplicationFaculty(application_id=application.id, faculty_id=faculty.id))
+        session.add(ApplicationFaculty(application=application, faculty=faculty))
     session.add(Order(organization_id=organization_id, application_id=application.id, status="CURRENT", created_by=user_id, is_current=True))
     return application
 

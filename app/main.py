@@ -219,10 +219,10 @@ def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), 
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.post("/contracts/{contract_id}")
-def edit_contract(request: Request, contract_id: int, number: str = Form(...), start_date: str = Form(...), end_date: str = Form("")):
+def edit_contract(request: Request, contract_id: int, faculty: list[str] = Form(...), number: str = Form(...), start_date: str = Form(...), end_date: str = Form("")):
     s = db(); contract = s.get(Contract, contract_id)
     if not contract: raise HTTPException(404)
-    update_contract(s, contract, number, start_date, end_date, audit_actor=audit_actor(request))
+    update_contract(s, contract, number, start_date, end_date, faculty, audit_actor=audit_actor(request))
     return RedirectResponse(f"/organizations/{contract.organization_id}", status_code=303)
 
 @app.post("/contracts/{contract_id}/status")
