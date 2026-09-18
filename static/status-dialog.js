@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         error.textContent = data.error || 'Не удалось изменить статус.';
         return;
       }
-      document.querySelectorAll(`[data-status-key="${form.dataset.statusKey}"]`).forEach((badge) => {
+      document.querySelectorAll(`mark[data-status-key="${form.dataset.statusKey}"]`).forEach((badge) => {
         badge.textContent = data.status;
         badge.className = data.status_class;
         badge.dataset.statusKey = form.dataset.statusKey;
