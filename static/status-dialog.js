@@ -15,7 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const reverseApplication = form.dataset.documentType === 'application'
         && form.dataset.currentStatus !== 'Заявка'
         && select.value === 'Заявка';
-      comment.required = select.value === 'Закрыт' || reverseApplication;
+      const closingRequiresComment = form.dataset.documentType !== 'contract'
+        && select.value === 'Закрыт';
+      comment.required = closingRequiresComment || reverseApplication;
     };
     select.addEventListener('change', refreshRequired);
     refreshRequired();
