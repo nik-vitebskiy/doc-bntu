@@ -16,40 +16,4 @@
 <div class="scans"><b>Сканы подписанных документов:</b>{% for u in c.uploads %}<a href="/uploads/{{ u.stored_name }}">{{ u.filename }}</a>{% else %}<span>не загружены</span>{% endfor %}<form method="post" action="/contracts/{{ c.id }}/scan" enctype="multipart/form-data"><label class="button secondary">＋ Прикрепить скан<input hidden type="file" name="file" accept=".pdf,.jpg,.jpeg" onchange="this.form.submit()"></label></form></div></section>
 {% set contract_transitions = allowed_status_transitions('contract', c.status, request.state.user.role) %}{% if contract_transitions %}<dialog id="contract-status-dialog-{{ c.id }}" class="status-dialog"><form class="status-form" method="post" action="/contracts/{{ c.id }}/status" data-document-type="contract" data-current-status="{{ c.status }}" data-status-key="contract-{{ c.id }}"><h2>Сменить статус договора {{ c.number }}</h2><label>Новый статус<select name="status">{% for status in contract_transitions %}<option>{{ status }}</option>{% endfor %}</select></label><label>Комментарий<textarea name="comment" rows="3" placeholder="Причина изменения статуса"></textarea></label><p class="status-error"></p><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog>Отмена</button><button>Сохранить</button></div></form></dialog>{% endif %}
 {% endfor %}
-<script>
-document.querySelectorAll('.faculty-multiselect').forEach((picker) => {
-  const summary = picker.querySelector('.faculty-summary');
-  const inputs = picker.querySelectorAll('input[type="checkbox"]');
-  const search = picker.querySelector('.faculty-search');
-  const refresh = () => {
-    const selected = [...inputs].filter((input) => input.checked);
-    if (!selected.length) summary.textContent = 'Выберите факультеты';
-    else if (selected.length === 1) summary.textContent = selected[0].value;
-    else summary.textContent = `${selected[0].value} + ещё ${selected.length - 1}`;
-  };
-  inputs.forEach((input) => input.addEventListener('change', refresh));
-  search.addEventListener('input', () => {
-    const query = search.value.trim().toLowerCase();
-    picker.querySelectorAll('[data-faculty-option]').forEach((option) => {
-      option.hidden = !option.textContent.toLowerCase().includes(query);
-    });
-  });
-  picker.closest('form').addEventListener('submit', (event) => {
-    if (![...inputs].some((input) => input.checked)) {
-      event.preventDefault();
-      picker.open = true;
-      summary.textContent = 'Выберите хотя бы один факультет';
-    }
-  });
-  refresh();
-});
-document.addEventListener('click', (event) => {
-  document.querySelectorAll('.faculty-multiselect[open]').forEach((picker) => {
-    if (!picker.contains(event.target)) picker.open = false;
-  });
-});
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') document.querySelectorAll('.faculty-multiselect[open]').forEach((picker) => picker.open = false);
-});
-</script>
 {% endblock %}

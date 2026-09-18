@@ -15,7 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const reverseApplication = form.dataset.documentType === 'application'
         && form.dataset.currentStatus !== 'Заявка'
         && select.value === 'Заявка';
-      comment.required = select.value === 'Закрыт' || reverseApplication;
+      const closingRequiresComment = form.dataset.documentType !== 'contract'
+        && select.value === 'Закрыт';
+      comment.required = closingRequiresComment || reverseApplication;
     };
     select.addEventListener('change', refreshRequired);
     refreshRequired();
@@ -29,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         error.textContent = data.error || 'Не удалось изменить статус.';
         return;
       }
-      document.querySelectorAll(`[data-status-key="${form.dataset.statusKey}"]`).forEach((badge) => {
+      document.querySelectorAll(`mark[data-status-key="${form.dataset.statusKey}"]`).forEach((badge) => {
         badge.textContent = data.status;
         badge.className = data.status_class;
         badge.dataset.statusKey = form.dataset.statusKey;
