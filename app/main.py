@@ -1,6 +1,7 @@
 import json, os, shutil, uuid
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlencode
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +14,7 @@ from .services.organization_service import attach_scan, compare_agreement_order,
 from .services.auth_service import authenticate, ensure_admin, ensure_head
 from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
+from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
 from .services.document_status_service import StatusTransitionError, allowed_status_transitions, change_agreement_status, change_application_status, change_contract_status
 from .services.status_service import order_change_class, status_class, status_label
 from .template_builder import make_template
@@ -39,6 +41,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "applications": ("/applications",),
         "contracts": ("/contracts", "/additional-agreements"),
         "documents": ("/documents",),
+        "audit": ("/audit",),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -95,6 +98,60 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/audit", response_class=HTMLResponse)
+def audit_registry(
+    request: Request,
+    user: str = "",
+    entity: str = "",
+    action: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    q: str = "",
+    page: int = 1,
+):
+    def parse_date(value: str):
+        try:
+            return date.fromisoformat(value) if value else None
+        except ValueError:
+            return None
+
+    session = db()
+    registry = get_audit_registry(
+        session,
+        user=user,
+        entity=entity,
+        action=action,
+        date_from=parse_date(date_from),
+        date_to=parse_date(date_to),
+        query=q,
+        page=page,
+    )
+    session.close()
+    pagination_query = urlencode({
+        key: value for key, value in {
+            "user": user,
+            "entity": entity,
+            "action": action,
+            "date_from": date_from,
+            "date_to": date_to,
+            "q": q,
+        }.items() if value
+    })
+    return views.TemplateResponse(request, "audit.html", {
+        "registry": registry,
+        "action_labels": ACTION_LABELS,
+        "entity_filters": ENTITY_FILTERS,
+        "selected_user": user,
+        "selected_entity": entity,
+        "selected_action": action,
+        "date_from": date_from,
+        "date_to": date_to,
+        "audit_query": q,
+        "pagination_query": pagination_query,
+        "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+    })
 
 @app.get("/", response_class=HTMLResponse)
 def registry(request: Request, q: str = "", faculty: str = "", end_year: str = ""):

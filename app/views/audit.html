@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="titlebar">
+  <div>
+    <h1>Журнал действий</h1>
+    <p>История изменений в системе. Записи журнала нельзя исправить или удалить.</p>
+  </div>
+</div>
+
+<section class="card audit-card">
+  <form class="audit-filters" method="get" action="/audit">
+    <label>Сотрудник
+      <select name="user">
+        <option value="">Все сотрудники</option>
+        <option value="system" {{ 'selected' if selected_user == 'system' }}>Система</option>
+        {% for user in registry.users %}<option value="{{ user.id }}" {{ 'selected' if selected_user == user.id|string }}>{{ user.full_name or user.username }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Тип объекта
+      <select name="entity">
+        <option value="">Все объекты</option>
+        {% for key, value in entity_filters.items() %}<option value="{{ key }}" {{ 'selected' if selected_entity == key }}>{{ value[0] }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Действие
+      <select name="action">
+        <option value="">Все, кроме входов</option>
+        {% for key, label in action_labels.items() %}<option value="{{ key }}" {{ 'selected' if selected_action == key }}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Период от<input type="date" name="date_from" value="{{ date_from }}"></label>
+    <label>до<input type="date" name="date_to" value="{{ date_to }}"></label>
+    <label class="audit-search">Поиск
+      <input type="search" name="q" value="{{ audit_query }}" placeholder="Объект, комментарий или изменение">
+    </label>
+    <div class="audit-filter-actions"><button>Применить</button><a class="button secondary" href="/audit">Сбросить</a></div>
+  </form>
+</section>
+
+<section class="card audit-card">
+  <div class="audit-summary">Найдено записей: <b>{{ registry.total }}</b></div>
+  <div class="tablewrap">
+    <table class="audit-table">
+      <thead><tr><th>Дата и время</th><th>Сотрудник</th><th>Действие</th><th>Объект</th><th>Комментарий</th><th aria-label="Раскрыть"></th></tr></thead>
+      <tbody>
+      {% for row in registry.rows %}
+        <tr class="audit-row" data-audit-toggle="audit-details-{{ row.id }}" tabindex="0" aria-expanded="false">
+          <td><time datetime="{{ row.timestamp.isoformat() }}">{{ row.timestamp.strftime('%d.%m.%Y %H:%M') }}</time></td>
+          <td>{{ row.employee }}</td>
+          <td><span class="audit-action audit-action-{{ row.action|lower }}">{{ row.action_label }}</span></td>
+          <td>{% if row.entity_url %}<a href="{{ row.entity_url }}">{{ row.entity_label }}</a>{% else %}{{ row.entity_label }}{% endif %}</td>
+          <td>{{ row.comment or '—' }}</td>
+          <td><button type="button" class="audit-expand" aria-label="Показать изменения" tabindex="-1">⌄</button></td>
+        </tr>
+        <tr id="audit-details-{{ row.id }}" class="audit-details" hidden>
+          <td colspan="6">
+            {% if row.copy_summary %}<p><b>{{ row.copy_summary }}</b></p>{% endif %}
+            {% if row.copied_items %}<ul>{% for item in row.copied_items %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+            {% if row.file_name %}<p><b>Файл:</b> {% if row.file_url %}<a href="{{ row.file_url }}" download>{{ row.file_name }}</a>{% else %}{{ row.file_name }} <span class="muted">(файл недоступен)</span>{% endif %}</p>{% endif %}
+            {% if row.diff_lines %}
+              <dl class="audit-diff">
+              {% for line in row.diff_lines %}
+                <dt>{{ line.label }}</dt><dd><span class="audit-old">{{ line.old }}</span><span class="audit-arrow">→</span><span class="audit-new">{{ line.new }}</span></dd>
+              {% endfor %}
+              </dl>
+            {% elif not row.copy_summary and not row.file_name %}<p class="muted">Дополнительных данных нет.</p>{% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="audit-empty">По выбранным условиям ничего не найдено.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if registry.pages > 1 %}
+  <nav class="pagination" aria-label="Страницы журнала">
+    {% if registry.page > 1 %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page - 1 }}">← Назад</a>{% endif %}
+    <span>Страница {{ registry.page }} из {{ registry.pages }}</span>
+    {% if registry.page < registry.pages %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page + 1 }}">Вперёд →</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}

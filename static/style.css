@@ -493,3 +493,35 @@ details form{
     display:none
   }
 }
+.audit-card { margin-bottom: 18px; }
+.audit-filters { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: 14px; align-items: end; }
+.audit-filters label { display: grid; gap: 6px; color: #52627b; font-size: 14px; }
+.audit-filters input, .audit-filters select { width: 100%; min-height: 42px; }
+.audit-search { grid-column: span 3; }
+.audit-filter-actions { display: flex; gap: 8px; align-items: center; }
+.audit-summary { margin-bottom: 12px; color: #65738a; }
+.audit-row { cursor: pointer; }
+.audit-row:hover td, .audit-row:focus td { background: #f1f6ff; }
+.audit-row:focus { outline: 2px solid #1d6fe8; outline-offset: -2px; }
+.audit-expand { border: 0; background: transparent; color: #52627b; font-size: 18px; transition: transform .15s ease; }
+.audit-row[aria-expanded="true"] .audit-expand { transform: rotate(180deg); }
+.audit-details td { background: #f7f9fc; padding: 18px 24px; }
+.audit-details[hidden] { display: none; }
+.audit-details p { margin: 0 0 10px; }
+.audit-details ul { margin: 0 0 14px 20px; }
+.audit-action { display: inline-block; padding: 4px 9px; border-radius: 999px; background: #e9eef6; color: #40516b; font-size: 13px; white-space: nowrap; }
+.audit-action-create, .audit-action-file_upload { background: #dff4e8; color: #14733d; }
+.audit-action-update, .audit-action-copy { background: #e3efff; color: #1559a6; }
+.audit-action-delete, .audit-action-file_delete { background: #f2e5e5; color: #8a3434; }
+.audit-action-status_change { background: #ece7fa; color: #6044a3; }
+.audit-diff { display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 8px 18px; margin: 0; }
+.audit-diff dt { color: #52627b; }
+.audit-diff dd { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); gap: 6px; overflow-wrap: anywhere; }
+.audit-old { color: #8a3434; }
+.audit-new { color: #14733d; }
+.audit-arrow { color: #8995a8; text-align: center; }
+.audit-empty { text-align: center; padding: 38px !important; color: #748198; }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 18px; }
+.audit-highlighted-target { scroll-margin-top: 90px; animation: audit-target 2.4s ease-out; }
+@keyframes audit-target { from { box-shadow: 0 0 0 4px rgba(29,111,232,.35); } to { box-shadow: none; } }
+@media (max-width: 1100px) { .audit-filters { grid-template-columns: repeat(2, minmax(180px, 1fr)); } .audit-search { grid-column: span 2; } }
