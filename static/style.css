@@ -183,6 +183,16 @@ p{
   color:#8290a4
 }
 
+.tree [hidden]{
+  display:none
+}
+
+.tree-empty{
+  margin:10px 6px;
+  color:#8290a4;
+  font-size:12px
+}
+
 .content{
   min-width:0
 }

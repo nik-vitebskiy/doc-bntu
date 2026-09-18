@@ -99,8 +99,8 @@ def logout(request: Request):
 @app.get("/", response_class=HTMLResponse)
 def registry(request: Request, q: str = "", faculty: str = "", end_year: str = ""):
     s = db()
-    contracts, faculties, counts, end_years = get_registry(s, q, faculty, end_year)
-    return views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "counts": counts, "q": q, "selected_faculty": faculty, "end_years": end_years, "selected_end_year": end_year})
+    contracts, faculties, counts, end_years, contract_count = get_registry(s, q, faculty, end_year)
+    return views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "contract_count": contract_count, "counts": counts, "q": q, "selected_faculty": faculty, "end_years": end_years, "selected_end_year": end_year})
 
 @app.get("/applications", response_class=HTMLResponse)
 def applications(request: Request, q: str = "", faculty: str = ""):

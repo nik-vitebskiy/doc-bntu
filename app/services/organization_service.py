@@ -57,9 +57,14 @@ def registry(session, query_text="", faculty="", end_year=""):
         query = query.filter(extract("year", Contract.end_date) == int(end_year))
     contracts = query.distinct().order_by(Contract.id).all()
     faculties = [row[0] for row in session.query(Faculty.name).order_by(Faculty.name)]
-    counts = dict(session.query(Faculty.name, func.count(ContractFaculty.contract_id)).join(ContractFaculty).group_by(Faculty.name).all())
+    counts = dict(
+        session.query(Faculty.name, func.count(func.distinct(ContractFaculty.contract_id)))
+        .join(ContractFaculty)
+        .group_by(Faculty.name)
+        .all()
+    )
     end_years = [row[0] for row in session.query(extract("year", Contract.end_date)).filter(Contract.end_date.is_not(None)).distinct().order_by(extract("year", Contract.end_date))]
-    return contracts, faculties, counts, end_years
+    return contracts, faculties, counts, end_years, len(contracts)
 
 
 @audited
