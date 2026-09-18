@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import extract, func, or_
 
 from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, ContractFaculty, Document, Faculty, Order, OrderItem, Organization, Specialty
+from .audit_service import AuditAction, audited, current_audit_batch
 
 
 def get_or_create_faculty(session, name):
@@ -24,10 +25,11 @@ def demo_user(session):
     return user
 
 
-def get_or_create_order(session, contract):
+def get_or_create_order(session, contract, user_id=None):
     order = session.query(Order).filter_by(contract_id=contract.id).order_by(Order.id).first()
     if not order:
-        order = Order(organization_id=contract.organization_id, contract_id=contract.id, created_by=demo_user(session).id)
+        creator_id = user_id or demo_user(session).id
+        order = Order(organization_id=contract.organization_id, contract_id=contract.id, created_by=creator_id)
         session.add(order)
         session.flush()
     return order
@@ -60,6 +62,7 @@ def registry(session, query_text="", faculty="", end_year=""):
     return contracts, faculties, counts, end_years
 
 
+@audited
 def create_organization(session, **values):
     name = values["name"].strip()
     unp = values.get("unp") or f"9{(session.query(func.count(Organization.id)).scalar() + 1):08d}"
@@ -67,10 +70,20 @@ def create_organization(session, **values):
                        legal_address=values.get("address") or None, authority=values.get("department") or None,
                        phone=values.get("phone") or None)
     session.add(org)
-    session.commit()
     return org
 
 
+@audited
+def update_organization(session, organization: Organization, **values):
+    organization.short_name = values["name"].strip()
+    organization.full_name = values.get("full_name", "").strip() or organization.short_name
+    organization.legal_address = values.get("address", "").strip() or None
+    organization.authority = values.get("department", "").strip() or None
+    organization.phone = values.get("phone", "").strip() or None
+    return organization
+
+
+@audited
 def create_contract(session, organization_id, faculties, number, end_date):
     names = faculties if isinstance(faculties, list) else [faculties]
     selected = [get_or_create_faculty(session, name) for name in names if name.strip()]
@@ -82,17 +95,37 @@ def create_contract(session, organization_id, faculties, number, end_date):
     session.add(contract)
     session.flush()
     for faculty in selected:
-        session.add(ContractFaculty(contract_id=contract.id, faculty_id=faculty.id))
-    session.commit()
+        session.add(ContractFaculty(contract=contract, faculty=faculty))
     return contract
 
 
-def save_item(session, contract_id, specialty, qualification, form_data, item=None):
+@audited
+def update_contract(session, contract: Contract, number: str, start_date: str, end_date: str, faculties):
+    contract.number = number.strip() or "Без номера"
+    contract.start_date = date.fromisoformat(start_date)
+    contract.end_date = date.fromisoformat(end_date) if end_date else None
+    names = {name.strip() for name in faculties if name.strip()}
+    selected = session.query(Faculty).filter(Faculty.name.in_(names)).all()
+    if len(selected) != len(names):
+        raise ValueError("Выбран неизвестный факультет.")
+    selected_ids = {faculty.id for faculty in selected}
+    existing = {link.faculty_id: link for link in contract.faculty_links}
+    for faculty in selected:
+        if faculty.id not in existing:
+            session.add(ContractFaculty(contract=contract, faculty=faculty))
+    for faculty_id, link in existing.items():
+        if faculty_id not in selected_ids:
+            session.delete(link)
+    return contract
+
+
+@audited
+def save_item(session, contract_id, specialty, qualification, form_data, item=None, user_id=None):
     values = {int(key.removeprefix("demand_")): int(value) if str(value).strip().isdigit() else 0
               for key, value in form_data.items() if key.startswith("demand_")}
     contract = session.get(Contract, contract_id)
     specialty_ref = get_or_create_specialty(session, specialty, qualification, ", ".join(contract.faculty_names))
-    item = item or OrderItem(order_id=get_or_create_order(session, contract).id, specialty_id=specialty_ref.id)
+    item = item or OrderItem(order_id=get_or_create_order(session, contract, user_id).id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
     for year, quantity in values.items():
         demand = next((row for row in item.annual_demands if row.year == year), None)
@@ -101,46 +134,112 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
         else:
             item.annual_demands.append(AnnualDemand(year=year, quantity=quantity))
     session.add(item)
-    session.commit()
     return item
 
 
+@audited
+def delete_item(session, item: OrderItem):
+    destination = {
+        "organization_id": item.order.contract.organization_id if item.order.contract else None,
+        "application_id": item.order.application_id,
+    }
+    for demand in list(item.annual_demands):
+        session.delete(demand)
+    session.delete(item)
+    return destination
+
+
+@audited
 def attach_scan(session, contract, filename, stored_name):
-    session.add(Document(organization_id=contract.organization_id, contract_id=contract.id,
-                         type="SIGNED_SCAN", status="SIGNED", file_id=stored_name))
-    session.commit()
+    document = Document(organization_id=contract.organization_id, contract_id=contract.id,
+                        type="SIGNED_SCAN", status="SIGNED", file_id=stored_name,
+                        original_filename=filename)
+    session.add(document)
+    return document
 
 
+@audited
 def register_additional_agreement(session, contract: Contract, number: str, agreement_date: date, user_id: int) -> AdditionalAgreement:
     """Copy the effective order, activate the new agreement and close its predecessor."""
-    source_order = session.query(Order).filter_by(contract_id=contract.id, is_current=True).order_by(Order.revision.desc()).first()
-    if not source_order:
-        source_order = get_or_create_order(session, contract)
     previous_agreement = session.query(AdditionalAgreement).filter_by(contract_id=contract.id, status="Активен").order_by(AdditionalAgreement.id.desc()).first()
     agreement = AdditionalAgreement(contract_id=contract.id, number=number, date=agreement_date, status="Активен",
                                     previous_agreement_id=previous_agreement.id if previous_agreement else None,
                                     activated_at=datetime.now(timezone.utc))
     session.add(agreement)
+    batch = current_audit_batch(session)
+    root_event = batch.record(
+        agreement,
+        AuditAction.CREATE,
+        comment=f"Активация дополнительного соглашения №{number}",
+    )
     session.flush()
 
-    if previous_agreement:
-        previous_agreement.status = "Закрыт"
-    else:
-        contract.status = "Закрыт"
-    source_order.is_current = False
+    source_order = session.query(Order).filter_by(contract_id=contract.id, is_current=True).order_by(Order.revision.desc()).first()
+    if not source_order:
+        source_order = get_or_create_order(session, contract, user_id)
+
     copied = Order(organization_id=contract.organization_id, contract_id=contract.id, additional_agreement_id=agreement.id,
                    status="CURRENT", created_by=user_id, previous_order_id=source_order.id,
                    revision=source_order.revision + 1, is_current=True)
     session.add(copied)
-    session.flush()
+    copied_entities = [copied]
+    copied_items = []
     for source_item in source_order.items:
-        item = OrderItem(order_id=copied.id, specialty_id=source_item.specialty_id,
+        item = OrderItem(order=copied, specialty_id=source_item.specialty_id,
                          qualification_value=source_item.qualification_value, profile=source_item.profile)
         session.add(item)
-        session.flush()
+        copied_entities.append(item)
+        demands = []
         for demand in source_item.annual_demands:
-            session.add(AnnualDemand(order_item_id=item.id, year=demand.year, quantity=demand.quantity))
-    session.commit()
+            cloned_demand = AnnualDemand(order_item=item, year=demand.year, quantity=demand.quantity)
+            session.add(cloned_demand)
+            copied_entities.append(cloned_demand)
+            demands.append({"year": demand.year, "quantity": demand.quantity})
+        copied_items.append({
+            "specialty": source_item.specialty,
+            "qualification": source_item.qualification,
+            "demand": demands,
+        })
+    batch.record_copy(
+        copied,
+        source_order_id=source_order.id,
+        items=copied_items,
+        copied_entities=copied_entities,
+        parent=root_event,
+    )
+
+    if previous_agreement:
+        old_status = previous_agreement.status
+        previous_agreement.status = "Закрыт"
+        batch.record(
+            previous_agreement,
+            AuditAction.STATUS_CHANGE,
+            old={"status": old_status},
+            new={"status": "Закрыт"},
+            comment=f"Активировано д.с. №{number}",
+            parent=root_event,
+        )
+    else:
+        old_status = contract.status
+        contract.status = "Закрыт"
+        batch.record(
+            contract,
+            AuditAction.STATUS_CHANGE,
+            old={"status": old_status},
+            new={"status": "Закрыт"},
+            comment=f"Активировано д.с. №{number}",
+            parent=root_event,
+        )
+    old_is_current = source_order.is_current
+    source_order.is_current = False
+    batch.record(
+        source_order,
+        AuditAction.UPDATE,
+        old={"is_current": old_is_current},
+        new={"is_current": False},
+        comment=f"Создана редакция заказа для д.с. №{number}",
+        parent=root_event,
+    )
     return agreement
 
 

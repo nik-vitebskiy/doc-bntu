@@ -3,6 +3,7 @@ from datetime import date, datetime
 from openpyxl import load_workbook
 
 from ..models import AnnualDemand, Contract, ContractFaculty, OrderItem, Organization
+from .audit_service import AuditAction, audited, current_audit_batch
 from .organization_service import get_or_create_faculty, get_or_create_order, get_or_create_specialty
 
 
@@ -23,7 +24,8 @@ def parse_date(value):
     return None
 
 
-def import_xlsx(path, session):
+@audited
+def import_xlsx(session, path, user_id=None, original_filename=None):
     """Import the legacy Excel export using contract_faculty as the source of truth."""
     worksheet = load_workbook(path, data_only=True).active
     headers = [text(cell.value) for cell in worksheet[1]]
@@ -65,7 +67,7 @@ def import_xlsx(path, session):
         specialty_code = text(field(row, "Код специальности, направления специальности, специализации"))
         if specialty_code:
             specialty = get_or_create_specialty(session, specialty_code, text(field(row, "Квалификация")), faculty_name)
-            order = get_or_create_order(session, contract)
+            order = get_or_create_order(session, contract, user_id)
             item = session.query(OrderItem).filter_by(order_id=order.id, specialty_id=specialty.id).first()
             if not item:
                 item = OrderItem(order_id=order.id, specialty_id=specialty.id)
@@ -74,5 +76,15 @@ def import_xlsx(path, session):
                 for year, column in years:
                     session.add(AnnualDemand(order_item_id=item.id, year=year, quantity=int(row[column] or 0)))
         count += 1
-    session.commit()
+    # Finish collecting imported rows before adding the summary so it is the
+    # last event in the deterministic sequence for this transaction.
+    session.flush()
+    display_name = original_filename or path.name
+    current_audit_batch(session).record_values(
+        AuditAction.FILE_UPLOAD,
+        "excel_import",
+        None,
+        f"Импорт Excel {display_name}",
+        new={"filename": display_name, "stored_name": path.name, "rows_processed": count},
+    )
     return count

@@ -1,7 +1,8 @@
 import json
 from datetime import date, datetime
 from pathlib import Path
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, event, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
 
@@ -16,6 +17,15 @@ class AppUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_setting"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True)
 
 
 class Faculty(Base):
@@ -193,12 +203,15 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(30), default="DRAFT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    original_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
     contract: Mapped[Contract | None] = relationship(back_populates="documents")
     application: Mapped[Application | None] = relationship(back_populates="documents")
     @property
     def stored_name(self): return self.file_id or ""
     @property
     def filename(self):
+        if self.original_filename:
+            return self.original_filename
         value = self.file_id or ""
         return value.split("-", 1)[1] if "-" in value else Path(value).name
 
@@ -210,5 +223,18 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(100))
     entity_type: Mapped[str] = mapped_column(String(50))
     entity_id: Mapped[int | None] = mapped_column(nullable=True)
-    details: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    entity_label: Mapped[str] = mapped_column(String(500))
+    diff: Mapped[dict] = mapped_column(JSONB, default=lambda: {"old": {}, "new": {}})
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    parent_event_id: Mapped[int | None] = mapped_column(ForeignKey("audit_log.id", ondelete="RESTRICT"), nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, default=1)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def _reject_audit_mutation(_mapper, _connection, _target):
+    raise ValueError("Audit records are immutable")
+
+
+event.listen(AuditLog, "before_update", _reject_audit_mutation)
+event.listen(AuditLog, "before_delete", _reject_audit_mutation)
