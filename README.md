@@ -13,3 +13,12 @@ docker-compose logs -f app
 ```
 
 В demo нет логина и пароля: реестр открывается сразу. Через кнопку «Импорт Excel» загрузите файл `МТЗ-из базы.xlsx`. Рабочий DOCX-шаблон генерируется при первом старте в `templates/dop_soglashenie.docx`; исходный образец лежит в той же папке. Сканы и созданные документы хранятся в `uploads/`, база PostgreSQL — в Docker-томе `postgres_data`.
+
+## Как запустить тесты
+
+Тесты используют отдельную временную PostgreSQL `app_test`; рабочая база не затрагивается.
+
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test
+docker compose -f docker-compose.test.yml down --volumes
+```

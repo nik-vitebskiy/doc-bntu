@@ -100,6 +100,7 @@ FIELD_LABELS = {
     "stored_name": "Сохранённый файл",
     "rows_processed": "Обработано строк",
     "username": "Логин",
+    "password": "Пароль",
     "role": "Роль",
     "is_active": "Активен",
     "last_login_at": "Последний вход",

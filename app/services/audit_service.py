@@ -60,6 +60,7 @@ class PendingAuditEvent:
 
 
 SENSITIVE_FIELDS = {"password_hash"}
+SENSITIVE_KEY_PARTS = ("password", "token", "secret", "api_key", "access_key", "private_key")
 AUDIT_BATCH_KEY = "audit_batch"
 
 
@@ -68,7 +69,14 @@ def _json_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, StrEnum):
         return value.value
-    if value is None or isinstance(value, (str, int, float, bool, list, dict)):
+    if isinstance(value, dict):
+        return {
+            str(key): "[СКРЫТО]" if any(part in str(key).lower() for part in SENSITIVE_KEY_PARTS) else _json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
 
@@ -79,6 +87,8 @@ def serialize_entity(entity: Any) -> dict[str, Any]:
     for attribute in state.mapper.column_attrs:
         key = attribute.key
         if key in SENSITIVE_FIELDS:
+            if getattr(entity, key, None):
+                result["password"] = "задан"
             continue
         result[key] = _json_value(getattr(entity, key, None))
     return result
@@ -350,10 +360,11 @@ class AuditBatch:
         original = self._original.get(id(entity), {})
         for attribute in state.mapper.column_attrs:
             key = attribute.key
-            if key in SENSITIVE_FIELDS:
-                continue
             history = state.attrs[key].history
             if not history.has_changes():
+                continue
+            if key in SENSITIVE_FIELDS:
+                changes["password"] = ("скрыт", "изменён")
                 continue
             old = _json_value(history.deleted[0]) if history.deleted else original.get(key)
             new = _json_value(history.added[-1]) if history.added else _json_value(getattr(entity, key, None))

@@ -93,6 +93,11 @@ def update_organization(session, organization: Organization, **values):
 
 
 @audited
+def delete_organization(session, organization: Organization):
+    session.delete(organization)
+
+
+@audited
 def create_contract(session, organization_id, faculties, number, end_date):
     names = faculties if isinstance(faculties, list) else [faculties]
     selected = [get_or_create_faculty(session, name) for name in names if name.strip()]

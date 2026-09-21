@@ -77,8 +77,8 @@ def change_password(session, user: AppUser, new_password: str):
     batch.record(
         user,
         AuditAction.UPDATE,
-        old={"password": "<set>"},
-        new={"password": "<changed>"},
+        old={"password": "задан"},
+        new={"password": "изменён"},
         comment="Пароль изменён",
     )
     return user

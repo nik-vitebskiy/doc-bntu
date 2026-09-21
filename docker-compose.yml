@@ -9,7 +9,6 @@ services:
       POSTGRES_PASSWORD: kadry
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kadry -d kadry"]
       interval: 5s
