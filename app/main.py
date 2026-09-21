@@ -7,15 +7,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSON
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, Faculty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, Document, Faculty
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement
-from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, delete_item, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
+from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import authenticate, ensure_admin, ensure_head
 from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
 from .services.document_status_service import StatusTransitionError, allowed_status_transitions, change_agreement_status, change_application_status, change_contract_status
+from .services.file_service import delete_document
 from .services.status_service import order_change_class, status_class, status_label
 from .template_builder import make_template
 
@@ -157,7 +158,12 @@ def audit_registry(
 def registry(request: Request, q: str = "", faculty: str = "", end_year: str = ""):
     s = db()
     contracts, faculties, counts, end_years, contract_count = get_registry(s, q, faculty, end_year)
-    return views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "contract_count": contract_count, "counts": counts, "q": q, "selected_faculty": faculty, "end_years": end_years, "selected_end_year": end_year})
+    selected_faculty_id = None
+    if faculty:
+        selected_faculty_id = s.query(Faculty.id).filter(Faculty.name == faculty).scalar()
+    response = views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "contract_count": contract_count, "counts": counts, "q": q, "selected_faculty": faculty, "selected_faculty_id": selected_faculty_id, "end_years": end_years, "selected_end_year": end_year})
+    s.close()
+    return response
 
 @app.get("/applications", response_class=HTMLResponse)
 def applications(request: Request, q: str = "", faculty: str = ""):
@@ -196,12 +202,15 @@ def set_application_status(request: Request, application_id: int, status: str = 
     try:
         change_application_status(s, application, status, request.state.user.role, comment, audit_actor=audit_actor(request))
     except StatusTransitionError as error:
+        s.close()
         return JSONResponse({"error": str(error)}, status_code=400)
-    return {
+    result = {
         "status": application.status,
         "status_class": status_class(application.status),
         "transitions": allowed_status_transitions("application", application.status, request.state.user.role),
     }
+    s.close()
+    return result
 
 @app.post("/applications/{application_id}/items")
 async def add_application_item(request: Request, application_id: int, specialty: str = Form(...), qualification: str = Form("")):
@@ -229,7 +238,9 @@ async def add_application_scan(request: Request, application_id: int, file: Uplo
         attach_application_scan(s, application, safe, stored, audit_actor=audit_actor(request))
     except Exception:
         target.unlink(missing_ok=True)
+        s.close()
         raise
+    s.close()
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/import")
@@ -264,11 +275,15 @@ def edit_organization(request: Request, org_id: int, name: str = Form(...), full
     return RedirectResponse(f"/organizations/{org.id}", status_code=303)
 
 @app.get("/organizations/{org_id}", response_class=HTMLResponse)
-def organization(request: Request, org_id: int):
+def organization(request: Request, org_id: int, faculty_id: int | None = None):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
+    context_faculty = s.get(Faculty, faculty_id) if faculty_id is not None else None
+    contracts = organization_contracts(org, context_faculty.id if context_faculty else None)
     years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
-    return views.TemplateResponse(request, "organization.html", {"org": org, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all()})
+    response = views.TemplateResponse(request, "organization.html", {"org": org, "contracts": contracts, "context_faculty": context_faculty, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all()})
+    s.close()
+    return response
 
 @app.post("/organizations/{org_id}/contract")
 def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), end_date: str = Form("")):
@@ -289,12 +304,15 @@ def set_contract_status(request: Request, contract_id: int, status: str = Form(.
     try:
         change_contract_status(s, contract, status, request.state.user.role, comment, audit_actor=audit_actor(request))
     except StatusTransitionError as error:
+        s.close()
         return JSONResponse({"error": str(error)}, status_code=400)
-    return {
+    result = {
         "status": contract.status,
         "status_class": status_class(contract.status),
         "transitions": allowed_status_transitions("contract", contract.status, request.state.user.role),
     }
+    s.close()
+    return result
 
 @app.post("/contracts/{contract_id}/additional-agreements")
 def add_additional_agreement(request: Request, contract_id: int, number: str = Form(...), agreement_date: str = Form(...)):
@@ -310,12 +328,15 @@ def set_agreement_status(request: Request, agreement_id: int, status: str = Form
     try:
         change_agreement_status(s, agreement, status, request.state.user.role, comment, audit_actor=audit_actor(request))
     except StatusTransitionError as error:
+        s.close()
         return JSONResponse({"error": str(error)}, status_code=400)
-    return {
+    result = {
         "status": agreement.status,
         "status_class": status_class(agreement.status),
         "transitions": allowed_status_transitions("additional_agreement", agreement.status, request.state.user.role),
     }
+    s.close()
+    return result
 
 @app.get("/additional-agreements/{agreement_id}/comparison", response_class=HTMLResponse)
 def agreement_comparison(request: Request, agreement_id: int):
@@ -360,8 +381,43 @@ async def add_scan(request: Request, contract_id: int, file: UploadFile = File(.
         attach_scan(s, c, safe, stored, audit_actor=audit_actor(request))
     except Exception:
         target.unlink(missing_ok=True)
+        s.close()
         raise
-    return RedirectResponse(f"/organizations/{c.organization_id}", status_code=303)
+    organization_id = c.organization_id
+    s.close()
+    return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
+
+
+@app.post("/documents/{document_id}/delete")
+def remove_document(request: Request, document_id: int):
+    session = db()
+    document = session.get(Document, document_id)
+    if not document or document.type != "SIGNED_SCAN":
+        session.close()
+        raise HTTPException(404)
+
+    application_id = document.application_id
+    organization_id = document.organization_id
+    stored_path = Path("uploads") / Path(document.stored_name).name
+    quarantine_path = stored_path.with_name(f".{stored_path.name}.deleting-{uuid.uuid4()}")
+    moved = False
+    if stored_path.is_file():
+        stored_path.replace(quarantine_path)
+        moved = True
+    try:
+        delete_document(session, document, audit_actor=audit_actor(request))
+    except Exception:
+        if moved and quarantine_path.is_file():
+            quarantine_path.replace(stored_path)
+        session.close()
+        raise
+    else:
+        if moved:
+            quarantine_path.unlink(missing_ok=True)
+        session.close()
+
+    destination = f"/applications/{application_id}" if application_id else f"/organizations/{organization_id}"
+    return RedirectResponse(destination, status_code=303)
 
 @app.get("/contracts/{contract_id}/agreement")
 def agreement(contract_id: int):

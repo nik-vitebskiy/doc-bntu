@@ -100,6 +100,7 @@ FIELD_LABELS = {
     "stored_name": "Сохранённый файл",
     "rows_processed": "Обработано строк",
     "username": "Логин",
+    "password": "Пароль",
     "role": "Роль",
     "is_active": "Активен",
     "last_login_at": "Последний вход",
@@ -299,9 +300,10 @@ def _order_url(order: Order, anchor: str | None = None) -> str | None:
 
 
 def _file_details(record: AuditLog, documents: dict[int, Document]) -> tuple[str | None, str | None]:
-    new = (record.diff or {}).get("new") or {}
-    filename = new.get("original_filename") or new.get("filename")
-    stored_name = new.get("file_id") or new.get("stored_name")
+    diff = record.diff or {}
+    values = (diff.get("old") if record.action == "FILE_DELETE" else diff.get("new")) or {}
+    filename = values.get("original_filename") or values.get("filename")
+    stored_name = values.get("file_id") or values.get("stored_name")
     if record.entity_type == "document" and record.entity_id:
         document = documents.get(record.entity_id)
         if document:

@@ -1,0 +1,104 @@
+"""Create the canonical PostgreSQL schema for a fresh installation."""
+
+from alembic import op
+
+
+revision = "20260915_00"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    # IF NOT EXISTS lets databases created by the former db/init script adopt
+    # Alembic without recreating or losing their data.
+    statements = (
+        """CREATE TABLE IF NOT EXISTS app_user (
+            id bigserial PRIMARY KEY, username varchar(100) NOT NULL UNIQUE,
+            password_hash varchar(255) NOT NULL, full_name varchar(255),
+            role varchar(30) NOT NULL DEFAULT 'SYSTEM', is_active boolean NOT NULL DEFAULT true,
+            created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at timestamptz
+        )""",
+        """CREATE TABLE IF NOT EXISTS faculty (
+            id bigserial PRIMARY KEY, name varchar(255) NOT NULL UNIQUE, code varchar(30) UNIQUE
+        )""",
+        """CREATE TABLE IF NOT EXISTS organization (
+            id bigserial PRIMARY KEY, unp varchar(9) NOT NULL UNIQUE,
+            short_name varchar(255) NOT NULL, full_name text NOT NULL,
+            legal_address text, authority varchar(255), phone varchar(50)
+        )""",
+        """CREATE TABLE IF NOT EXISTS contract (
+            id bigserial PRIMARY KEY, organization_id bigint NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+            number varchar(100) NOT NULL, start_date date NOT NULL, end_date date,
+            status varchar(30) NOT NULL DEFAULT 'Активен'
+        )""",
+        """CREATE TABLE IF NOT EXISTS contract_faculty (
+            contract_id bigint NOT NULL REFERENCES contract(id) ON DELETE CASCADE,
+            faculty_id bigint NOT NULL REFERENCES faculty(id), PRIMARY KEY(contract_id, faculty_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS additional_agreement (
+            id bigserial PRIMARY KEY, contract_id bigint NOT NULL REFERENCES contract(id) ON DELETE CASCADE,
+            number varchar(100) NOT NULL, date date NOT NULL,
+            status varchar(30) NOT NULL DEFAULT 'Активен',
+            previous_agreement_id bigint REFERENCES additional_agreement(id), activated_at timestamptz,
+            CONSTRAINT uq_agreement_number UNIQUE(contract_id, number)
+        )""",
+        """CREATE TABLE IF NOT EXISTS application (
+            id bigserial PRIMARY KEY, organization_id bigint NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+            number varchar(100) NOT NULL, signed_date date NOT NULL,
+            status varchar(30) NOT NULL DEFAULT 'Заявка', created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by bigint REFERENCES app_user(id),
+            CONSTRAINT uq_application_number UNIQUE(organization_id, number)
+        )""",
+        """CREATE TABLE IF NOT EXISTS application_faculty (
+            application_id bigint NOT NULL REFERENCES application(id) ON DELETE CASCADE,
+            faculty_id bigint NOT NULL REFERENCES faculty(id), PRIMARY KEY(application_id, faculty_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS specialty (
+            id bigserial PRIMARY KEY, code varchar(50) NOT NULL UNIQUE,
+            name varchar(255) NOT NULL, qualification varchar(255), faculty varchar(255)
+        )""",
+        """CREATE TABLE IF NOT EXISTS orders (
+            id bigserial PRIMARY KEY, organization_id bigint NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+            contract_id bigint REFERENCES contract(id) ON DELETE SET NULL,
+            additional_agreement_id bigint REFERENCES additional_agreement(id) ON DELETE SET NULL,
+            application_id bigint REFERENCES application(id) ON DELETE SET NULL,
+            previous_order_id bigint REFERENCES orders(id), is_current boolean NOT NULL DEFAULT true,
+            revision integer NOT NULL DEFAULT 1, status varchar(30) NOT NULL DEFAULT 'CURRENT',
+            created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by bigint NOT NULL REFERENCES app_user(id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS order_item (
+            id bigserial PRIMARY KEY, order_id bigint NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            specialty_id bigint NOT NULL REFERENCES specialty(id), qualification varchar(255), profile varchar(255),
+            CONSTRAINT uq_order_specialty UNIQUE(order_id, specialty_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS annual_demand (
+            id bigserial PRIMARY KEY, order_item_id bigint NOT NULL REFERENCES order_item(id) ON DELETE CASCADE,
+            year integer NOT NULL, quantity integer NOT NULL,
+            CONSTRAINT uq_annual_demand UNIQUE(order_item_id, year)
+        )""",
+        """CREATE TABLE IF NOT EXISTS document (
+            id bigserial PRIMARY KEY, organization_id bigint NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+            contract_id bigint REFERENCES contract(id) ON DELETE SET NULL,
+            additional_agreement_id bigint REFERENCES additional_agreement(id) ON DELETE SET NULL,
+            application_id bigint REFERENCES application(id) ON DELETE SET NULL,
+            type varchar(50) NOT NULL, version integer NOT NULL DEFAULT 1,
+            status varchar(30) NOT NULL DEFAULT 'DRAFT', created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            file_id varchar(255), original_filename varchar(500)
+        )""",
+        """CREATE TABLE IF NOT EXISTS audit_log (
+            id bigserial PRIMARY KEY, user_id bigint REFERENCES app_user(id) ON DELETE SET NULL,
+            action varchar(100) NOT NULL, entity_type varchar(50) NOT NULL,
+            entity_id bigint, details text, created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_contract_organization ON contract(organization_id)",
+        "CREATE INDEX IF NOT EXISTS idx_contract_organization_number ON contract(organization_id, number)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id)",
+    )
+    for statement in statements:
+        op.execute(statement)
+
+
+def downgrade():
+    raise NotImplementedError("Production migrations are intentionally forward-only.")

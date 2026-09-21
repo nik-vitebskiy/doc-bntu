@@ -408,6 +408,32 @@ dd{
   margin-bottom:16px
 }
 
+.faculty-context-contract{
+  background:#f8fbff;
+  border-color:#b9d4f7;
+  box-shadow:inset 3px 0 #6ca4e8
+}
+
+.faculty-context-badge{
+  display:inline-flex;
+  margin-left:8px;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#e8f2ff;
+  color:#2868ad;
+  font-size:12px;
+  font-weight:600;
+  vertical-align:middle
+}
+
+.faculty-context-name{
+  padding:1px 5px;
+  border-radius:4px;
+  background:#dcecff;
+  color:#1d5f9f;
+  font-weight:600
+}
+
 .contracthead{
   display:flex;
   align-items:center;
@@ -431,8 +457,34 @@ dd{
   color:#1466d9
 }
 
-.scans form{
+.scans > form{
   margin-left:auto
+}
+
+.scan-file{
+  display:inline-flex;
+  align-items:center;
+  gap:5px
+}
+
+.scan-file form{
+  display:inline-flex
+}
+
+.scan-delete{
+  width:25px;
+  height:25px;
+  padding:0;
+  border:0;
+  border-radius:50%;
+  background:#eef2f7;
+  color:#69768a;
+  cursor:pointer
+}
+
+.scan-delete:hover{
+  background:#f4dddd;
+  color:#9a2e2e
 }
 
 details{

@@ -71,6 +71,19 @@ def registry(session, query_text="", faculty="", end_year=""):
     return contracts, faculties, counts, end_years, len(contracts)
 
 
+def organization_contracts(organization, faculty_id=None):
+    """Order an organization's contracts while preserving optional faculty context."""
+    context_id = faculty_id if faculty_id is not None else None
+
+    def sort_key(contract):
+        belongs_to_context = context_id is not None and any(
+            link.faculty_id == context_id for link in contract.faculty_links
+        )
+        return belongs_to_context, contract.start_date or date.min, contract.id
+
+    return sorted(organization.contracts, key=sort_key, reverse=True)
+
+
 @audited
 def create_organization(session, **values):
     name = values["name"].strip()
@@ -90,6 +103,11 @@ def update_organization(session, organization: Organization, **values):
     organization.authority = values.get("department", "").strip() or None
     organization.phone = values.get("phone", "").strip() or None
     return organization
+
+
+@audited
+def delete_organization(session, organization: Organization):
+    session.delete(organization)
 
 
 @audited
