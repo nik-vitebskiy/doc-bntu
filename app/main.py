@@ -11,7 +11,15 @@ from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, Ad
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement
 from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
-from .services.auth_service import authenticate, ensure_admin, ensure_head
+from .services.auth_service import (
+    authenticate,
+    change_password,
+    create_initial_admin,
+    create_user,
+    has_users,
+    update_user,
+    verify_password,
+)
 from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
@@ -43,6 +51,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "contracts": ("/contracts", "/additional-agreements"),
         "documents": ("/documents",),
         "audit": ("/audit",),
+        "users": ("/users",),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -62,26 +71,40 @@ views.env.globals["urgency"] = urgency
 @app.on_event("startup")
 def startup():
     make_template()
-    s = db(); ensure_admin(s); ensure_head(s); s.close()
 
 @app.middleware("http")
 async def require_login(request: Request, call_next):
-    if request.url.path.startswith(("/static", "/login")):
+    path = request.url.path
+    if path.startswith("/static") or path in {"/setup", "/login"}:
         return await call_next(request)
     user_id = request.session.get("user_id")
     if not user_id:
-        return RedirectResponse("/login", status_code=303)
-    s = db(); user = s.get(AppUser, user_id); s.close()
+        session = db()
+        destination = "/login" if has_users(session) else "/setup"
+        session.close()
+        return RedirectResponse(destination, status_code=303)
+    s = db(); user = s.get(AppUser, user_id)
     if not user or not user.is_active:
+        destination = "/login" if has_users(s) else "/setup"
+        s.close()
         request.session.clear()
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse(destination, status_code=303)
     request.state.user = user
+    must_change_password = user.must_change_password
+    s.close()
+    if must_change_password and path not in {"/change-password", "/logout"}:
+        return RedirectResponse("/change-password", status_code=303)
     return await call_next(request)
 
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me-before-production"), https_only=False)
 
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
+    session = db()
+    configured = has_users(session)
+    session.close()
+    if not configured:
+        return RedirectResponse("/setup", status_code=303)
     return views.TemplateResponse(request, "login.html", {"error": ""})
 
 @app.post("/login", response_class=HTMLResponse)
@@ -92,13 +115,164 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         s.close()
         return views.TemplateResponse(request, "login.html", {"error": "Неверный логин или пароль."}, status_code=401)
     request.session["user_id"] = user.id
+    must_change_password = user.must_change_password
     s.close()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/change-password" if must_change_password else "/", status_code=303)
 
 @app.get("/logout")
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_form(request: Request):
+    session = db()
+    configured = has_users(session)
+    session.close()
+    if configured:
+        return RedirectResponse("/login", status_code=303)
+    return views.TemplateResponse(request, "setup.html", {"error": ""})
+
+
+@app.post("/setup", response_class=HTMLResponse)
+def setup(
+    request: Request,
+    full_name: str = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
+    password_repeat: str = Form(...),
+):
+    session = db()
+    if has_users(session):
+        session.close()
+        return RedirectResponse("/login", status_code=303)
+    try:
+        if password != password_repeat:
+            raise ValueError("Пароли не совпадают.")
+        create_initial_admin(session, full_name, username, password)
+    except ValueError as error:
+        session.close()
+        return views.TemplateResponse(request, "setup.html", {
+            "error": str(error), "full_name": full_name, "username": username,
+        }, status_code=400)
+    session.close()
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/change-password", response_class=HTMLResponse)
+def change_password_form(request: Request):
+    return views.TemplateResponse(request, "change_password.html", {
+        "error": "", "forced": request.state.user.must_change_password,
+    })
+
+
+@app.post("/change-password", response_class=HTMLResponse)
+def save_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    password_repeat: str = Form(...),
+):
+    session = db()
+    user = session.get(AppUser, request.state.user.id)
+    try:
+        if not verify_password(current_password, user.password_hash):
+            raise ValueError("Текущий пароль указан неверно.")
+        if new_password != password_repeat:
+            raise ValueError("Новые пароли не совпадают.")
+        change_password(session, user, new_password, audit_actor=audit_actor(request))
+    except ValueError as error:
+        forced = user.must_change_password
+        session.close()
+        return views.TemplateResponse(request, "change_password.html", {
+            "error": str(error), "forced": forced,
+        }, status_code=400)
+    session.close()
+    return RedirectResponse("/", status_code=303)
+
+
+def require_admin(request: Request) -> None:
+    if request.state.user.role != "ADMIN":
+        raise HTTPException(403, "Управление пользователями доступно только администратору.")
+
+
+@app.get("/users", response_class=HTMLResponse)
+def users_registry(request: Request):
+    require_admin(request)
+    session = db()
+    users = session.query(AppUser).filter(AppUser.role.in_(("ADMIN", "HEAD"))).order_by(AppUser.full_name, AppUser.username).all()
+    response = views.TemplateResponse(request, "users.html", {"users": users})
+    session.close()
+    return response
+
+
+@app.get("/users/new", response_class=HTMLResponse)
+def new_user_form(request: Request):
+    require_admin(request)
+    return views.TemplateResponse(request, "user_form.html", {"edited_user": None, "error": ""})
+
+
+@app.post("/users/new", response_class=HTMLResponse)
+def add_user(
+    request: Request,
+    full_name: str = Form(...),
+    username: str = Form(...),
+    role: str = Form(...),
+    initial_password: str = Form(...),
+    password_repeat: str = Form(...),
+):
+    require_admin(request)
+    session = db()
+    try:
+        if initial_password != password_repeat:
+            raise ValueError("Пароли не совпадают.")
+        create_user(
+            session, full_name, username, role, initial_password,
+            audit_actor=audit_actor(request),
+        )
+    except ValueError as error:
+        session.close()
+        return views.TemplateResponse(request, "user_form.html", {
+            "edited_user": None, "error": str(error), "full_name": full_name,
+            "username": username, "selected_role": role,
+        }, status_code=400)
+    session.close()
+    return RedirectResponse("/users", status_code=303)
+
+
+@app.get("/users/{user_id}/edit", response_class=HTMLResponse)
+def edit_user_form(request: Request, user_id: int):
+    require_admin(request)
+    session = db()
+    user = session.get(AppUser, user_id)
+    if not user:
+        session.close()
+        raise HTTPException(404)
+    response = views.TemplateResponse(request, "user_form.html", {"edited_user": user, "error": ""})
+    session.close()
+    return response
+
+
+@app.post("/users/{user_id}/edit", response_class=HTMLResponse)
+def save_user(request: Request, user_id: int, full_name: str = Form(...), role: str = Form(...)):
+    require_admin(request)
+    session = db()
+    user = session.get(AppUser, user_id)
+    if not user:
+        session.close()
+        raise HTTPException(404)
+    try:
+        update_user(session, user, full_name, role, audit_actor=audit_actor(request))
+    except ValueError as error:
+        response = views.TemplateResponse(request, "user_form.html", {
+            "edited_user": user, "error": str(error), "full_name": full_name,
+            "selected_role": role,
+        }, status_code=400)
+        session.close()
+        return response
+    session.close()
+    return RedirectResponse("/users", status_code=303)
 
 
 @app.get("/audit", response_class=HTMLResponse)

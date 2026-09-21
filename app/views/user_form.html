@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back" href="/users">← К списку пользователей</a>
+<section class="card account-card">
+  <h1>{{ 'Редактировать пользователя' if edited_user else 'Создать пользователя' }}</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ '/users/' ~ edited_user.id ~ '/edit' if edited_user else '/users/new' }}" class="form account-form">
+    <label>ФИО<input name="full_name" value="{{ full_name|default(edited_user.full_name if edited_user else '') }}" required autofocus></label>
+    {% if edited_user %}
+      <label>Логин<input value="{{ edited_user.username }}" disabled></label>
+    {% else %}
+      <label>Логин<input name="username" value="{{ username|default('') }}" autocomplete="username" required></label>
+    {% endif %}
+    {% set current_role = selected_role|default(edited_user.role if edited_user else 'HEAD') %}
+    <label>Роль<select name="role" required><option value="HEAD" {{ 'selected' if current_role == 'HEAD' }}>Руководитель отдела</option><option value="ADMIN" {{ 'selected' if current_role == 'ADMIN' }}>Администратор</option></select></label>
+    {% if not edited_user %}
+      <label>Начальный пароль<input name="initial_password" type="password" minlength="8" autocomplete="new-password" required></label>
+      <label>Повторите пароль<input name="password_repeat" type="password" minlength="8" autocomplete="new-password" required></label>
+      <p class="form-hint">Не менее 8 символов. При первом входе сотрудник обязательно задаст новый пароль.</p>
+    {% endif %}
+    <button class="button">{{ 'Сохранить' if edited_user else 'Создать пользователя' }}</button>
+  </form>
+</section>
+{% endblock %}
