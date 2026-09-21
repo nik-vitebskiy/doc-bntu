@@ -431,8 +431,34 @@ dd{
   color:#1466d9
 }
 
-.scans form{
+.scans > form{
   margin-left:auto
+}
+
+.scan-file{
+  display:inline-flex;
+  align-items:center;
+  gap:5px
+}
+
+.scan-file form{
+  display:inline-flex
+}
+
+.scan-delete{
+  width:25px;
+  height:25px;
+  padding:0;
+  border:0;
+  border-radius:50%;
+  background:#eef2f7;
+  color:#69768a;
+  cursor:pointer
+}
+
+.scan-delete:hover{
+  background:#f4dddd;
+  color:#9a2e2e
 }
 
 details{
