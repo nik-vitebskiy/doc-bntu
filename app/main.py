@@ -10,7 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, Document, Faculty
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement
-from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, delete_item, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
+from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import authenticate, ensure_admin, ensure_head
 from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
@@ -158,7 +158,12 @@ def audit_registry(
 def registry(request: Request, q: str = "", faculty: str = "", end_year: str = ""):
     s = db()
     contracts, faculties, counts, end_years, contract_count = get_registry(s, q, faculty, end_year)
-    return views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "contract_count": contract_count, "counts": counts, "q": q, "selected_faculty": faculty, "end_years": end_years, "selected_end_year": end_year})
+    selected_faculty_id = None
+    if faculty:
+        selected_faculty_id = s.query(Faculty.id).filter(Faculty.name == faculty).scalar()
+    response = views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "contract_count": contract_count, "counts": counts, "q": q, "selected_faculty": faculty, "selected_faculty_id": selected_faculty_id, "end_years": end_years, "selected_end_year": end_year})
+    s.close()
+    return response
 
 @app.get("/applications", response_class=HTMLResponse)
 def applications(request: Request, q: str = "", faculty: str = ""):
@@ -270,11 +275,15 @@ def edit_organization(request: Request, org_id: int, name: str = Form(...), full
     return RedirectResponse(f"/organizations/{org.id}", status_code=303)
 
 @app.get("/organizations/{org_id}", response_class=HTMLResponse)
-def organization(request: Request, org_id: int):
+def organization(request: Request, org_id: int, faculty_id: int | None = None):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
+    context_faculty = s.get(Faculty, faculty_id) if faculty_id is not None else None
+    contracts = organization_contracts(org, context_faculty.id if context_faculty else None)
     years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
-    return views.TemplateResponse(request, "organization.html", {"org": org, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all()})
+    response = views.TemplateResponse(request, "organization.html", {"org": org, "contracts": contracts, "context_faculty": context_faculty, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all()})
+    s.close()
+    return response
 
 @app.post("/organizations/{org_id}/contract")
 def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), end_date: str = Form("")):

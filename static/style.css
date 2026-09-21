@@ -408,6 +408,32 @@ dd{
   margin-bottom:16px
 }
 
+.faculty-context-contract{
+  background:#f8fbff;
+  border-color:#b9d4f7;
+  box-shadow:inset 3px 0 #6ca4e8
+}
+
+.faculty-context-badge{
+  display:inline-flex;
+  margin-left:8px;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#e8f2ff;
+  color:#2868ad;
+  font-size:12px;
+  font-weight:600;
+  vertical-align:middle
+}
+
+.faculty-context-name{
+  padding:1px 5px;
+  border-radius:4px;
+  background:#dcecff;
+  color:#1d5f9f;
+  font-weight:600
+}
+
 .contracthead{
   display:flex;
   align-items:center;
