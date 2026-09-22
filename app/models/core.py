@@ -89,6 +89,18 @@ class ContractFaculty(Base):
     faculty: Mapped[Faculty] = relationship()
 
 
+class ContractRedirect(Base):
+    __tablename__ = "contract_redirect"
+    old_contract_id: Mapped[int] = mapped_column(primary_key=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contract.id", ondelete="CASCADE"))
+
+
+class OrderRedirect(Base):
+    __tablename__ = "order_redirect"
+    old_order_id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
+
+
 class AdditionalAgreement(Base):
     __tablename__ = "additional_agreement"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -167,10 +179,12 @@ class OrderItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
     specialty_id: Mapped[int] = mapped_column(ForeignKey("specialty.id"))
+    faculty_id: Mapped[int | None] = mapped_column(ForeignKey("faculty.id"), nullable=True)
     qualification_value: Mapped[str | None] = mapped_column("qualification", String(255), nullable=True)
     profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
     order: Mapped[Order] = relationship(back_populates="items")
     specialty_ref: Mapped[Specialty] = relationship()
+    faculty: Mapped[Faculty | None] = relationship()
     annual_demands: Mapped[list["AnnualDemand"]] = relationship(back_populates="order_item", cascade="all, delete-orphan")
     @property
     def contract_id(self): return self.order.contract_id
