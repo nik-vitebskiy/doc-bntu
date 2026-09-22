@@ -20,7 +20,7 @@ def migrated_schema_is_complete():
     with engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         faculty_count = connection.execute(text("SELECT count(*) FROM faculty")).scalar_one()
-    assert revision == "20260918_06"
+    assert revision == "20260921_07"
     assert faculty_count == 17
 
 
@@ -96,10 +96,21 @@ def contract(session, organization, actor):
 
 
 @pytest.fixture
-def client():
+def client(session):
+    from app.services.auth_service import hash_password
     from app.main import app
 
+    admin = AppUser(
+        username="test-admin",
+        password_hash=hash_password("Test-password-123"),
+        full_name="Администратор тестов",
+        role="ADMIN",
+        must_change_password=False,
+    )
+    session.add(admin)
+    session.commit()
+
     with TestClient(app, follow_redirects=False) as value:
-        response = value.post("/login", data={"username": "admin", "password": "admin"})
+        response = value.post("/login", data={"username": "test-admin", "password": "Test-password-123"})
         assert response.status_code == 303
         yield value

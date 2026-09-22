@@ -123,4 +123,5 @@ def test_passwords_tokens_and_secrets_are_redacted(session, actor):
     password_event = session.scalars(
         select(AuditLog).where(AuditLog.entity_type == "app_user", AuditLog.action == "UPDATE")
     ).one()
-    assert password_event.diff == {"old": {"password": "задан"}, "new": {"password": "изменён"}}
+    assert password_event.diff == {"old": {}, "new": {}}
+    assert password_event.comment == "Пароль изменён"

@@ -12,7 +12,9 @@ def main():
         if session.query(Organization).filter_by(unp="000000001").first():
             print("Test data already exists")
             return
-        admin = session.query(AppUser).filter_by(username="admin").one()
+        admin = session.query(AppUser).filter_by(role="ADMIN").order_by(AppUser.id).first()
+        if not admin:
+            raise RuntimeError("Сначала создайте учётную запись администратора через веб-интерфейс.")
         actor = AuditActor(admin.id)
         with AuditBatch(session, actor, comment="Созданы данные для ручного тестирования"):
             organization = Organization(unp="000000001", short_name="ТЕСТ — Организация-заказчик",

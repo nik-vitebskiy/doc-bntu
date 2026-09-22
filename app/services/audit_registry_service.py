@@ -103,6 +103,7 @@ FIELD_LABELS = {
     "password": "Пароль",
     "role": "Роль",
     "is_active": "Активен",
+    "must_change_password": "Требуется сменить пароль",
     "last_login_at": "Последний вход",
     "key": "Параметр",
     "value": "Значение",
