@@ -392,6 +392,10 @@ class AuditBatch:
             if event.parent:
                 if not event.parent.audit_row:
                     raise RuntimeError("A parent audit event must precede its child")
+                # Flush the pending parent only when a child needs its id.
+                # Independent import events can be inserted in one batch.
+                if event.parent.audit_row.id is None:
+                    self.session.flush()
                 parent_id = event.parent.audit_row.id
 
             row = AuditLog(
@@ -407,8 +411,8 @@ class AuditBatch:
                 sequence=sequence,
             )
             self.session.add(row)
-            self.session.flush()
             event.audit_row = row
+        self.session.flush()
 
 
 def current_audit_batch(session: Session) -> AuditBatch:
