@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-from app.models import AuditLog
+from app.models import AuditLog, ContractRedirect, OrderRedirect
 from app.services.audit_registry_service import get_audit_registry
-from app.services.organization_service import delete_organization
+from app.services.organization_service import delete_organization, get_or_create_order
 
 
 def _row(user_id, index, *, action="UPDATE", entity_type="contract", label=None, comment=None):
@@ -102,3 +102,20 @@ def test_audit_page_renders_without_raw_json(session, user, client):
     assert "Смена статуса" in response.text
     assert "Тестовый комментарий" in response.text
     assert '"old"' not in response.text
+
+
+def test_historical_contract_and_order_events_link_to_merged_contract(session, contract, user):
+    order = get_or_create_order(session, contract, user.id)
+    session.add(ContractRedirect(old_contract_id=9001, contract_id=contract.id))
+    session.add(OrderRedirect(old_order_id=9002, order_id=order.id))
+    session.add_all([
+        AuditLog(user_id=user.id, action="CREATE", entity_type="contract", entity_id=9001,
+                 entity_label="Исторический договор", diff={"new": {"number": contract.number}}, sequence=1),
+        AuditLog(user_id=user.id, action="CREATE", entity_type="order", entity_id=9002,
+                 entity_label="Исторический заказ", diff={"new": {}}, sequence=2),
+    ])
+    session.commit()
+    rows = get_audit_registry(session).rows
+    urls = {row.entity_type: row.entity_url for row in rows if row.entity_label.startswith("Исторический")}
+    assert urls["contract"] == f"/organizations/{contract.organization_id}?audit_highlight=contract-{contract.id}"
+    assert urls["order"] == f"/organizations/{contract.organization_id}"

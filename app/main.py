@@ -1,4 +1,4 @@
-import json, os, shutil, uuid
+import json, logging, os, shutil, uuid
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlencode
@@ -27,6 +27,7 @@ from .services.document_status_service import StatusTransitionError, allowed_sta
 from .services.file_service import delete_document
 from .services.status_service import order_change_class, status_class, status_label
 from .template_builder import make_template
+logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True); Path("uploads").mkdir(exist_ok=True)
 app = FastAPI(title="Кадровый заказ")
@@ -425,7 +426,8 @@ async def upload_import(request: Request, file: UploadFile = File(...)):
     with path.open("wb") as out: shutil.copyfileobj(file.file, out)
     s = db()
     try:
-        import_xlsx(s, path, request.state.user.id, original_filename, audit_actor=audit_actor(request))
+        result = import_xlsx(s, path, request.state.user.id, original_filename, audit_actor=audit_actor(request))
+        logger.info(result.log_line("веб"))
     except Exception:
         path.unlink(missing_ok=True)
         raise
@@ -461,15 +463,27 @@ def organization(request: Request, org_id: int, faculty_id: int | None = None):
 
 @app.post("/organizations/{org_id}/contract")
 def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), end_date: str = Form("")):
-    s = db(); create_contract(s, org_id, faculty, number, end_date, audit_actor=audit_actor(request))
+    s = db()
+    try:
+        create_contract(s, org_id, faculty, number, end_date, audit_actor=audit_actor(request))
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
+    s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.post("/contracts/{contract_id}")
 def edit_contract(request: Request, contract_id: int, faculty: list[str] = Form(...), number: str = Form(...), start_date: str = Form(...), end_date: str = Form("")):
     s = db(); contract = s.get(Contract, contract_id)
     if not contract: raise HTTPException(404)
-    update_contract(s, contract, number, start_date, end_date, faculty, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{contract.organization_id}", status_code=303)
+    organization_id = contract.organization_id
+    try:
+        update_contract(s, contract, number, start_date, end_date, faculty, audit_actor=audit_actor(request))
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
+    s.close()
+    return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 
 @app.post("/contracts/{contract_id}/status")
 def set_contract_status(request: Request, contract_id: int, status: str = Form(...), comment: str = Form("")):
@@ -524,16 +538,28 @@ async def add_item(contract_id: int, request: Request, specialty: str = Form(...
     s = db(); c = s.get(Contract, contract_id)
     if not c: raise HTTPException(404)
     form = await request.form()
-    save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{c.organization_id}", status_code=303)
+    organization_id = c.organization_id
+    try:
+        save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, audit_actor=audit_actor(request))
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
+    s.close()
+    return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 
 @app.post("/items/{item_id}")
 async def edit_item(item_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
     s = db(); item = s.get(OrderItem, item_id)
     if not item: raise HTTPException(404)
     form = await request.form()
-    save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{item.contract.organization_id}", status_code=303)
+    organization_id = item.contract.organization_id
+    try:
+        save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, audit_actor=audit_actor(request))
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
+    s.close()
+    return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 
 @app.post("/items/{item_id}/delete")
 def remove_item(request: Request, item_id: int):

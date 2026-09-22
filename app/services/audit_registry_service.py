@@ -17,9 +17,11 @@ from ..models import (
     Application,
     AuditLog,
     Contract,
+    ContractRedirect,
     Document,
     Order,
     OrderItem,
+    OrderRedirect,
     Organization,
 )
 
@@ -245,6 +247,14 @@ def _bulk_entity_urls(session: Session, records: list[AuditLog]) -> dict[tuple[s
             select(Contract.id, Contract.organization_id).where(Contract.id.in_(contract_ids))
         ):
             urls[("contract", contract_id)] = f"/organizations/{organization_id}?audit_highlight=contract-{contract_id}"
+        missing = contract_ids - {entity_id for entity_type, entity_id in urls if entity_type == "contract"}
+        if missing:
+            for old_id, canonical_id, organization_id in session.execute(
+                select(ContractRedirect.old_contract_id, Contract.id, Contract.organization_id)
+                .join(Contract, Contract.id == ContractRedirect.contract_id)
+                .where(ContractRedirect.old_contract_id.in_(missing))
+            ):
+                urls[("contract", old_id)] = f"/organizations/{organization_id}?audit_highlight=contract-{canonical_id}"
 
     agreement_ids = by_type.get("additional_agreement", set())
     if agreement_ids:
@@ -266,6 +276,16 @@ def _bulk_entity_urls(session: Session, records: list[AuditLog]) -> dict[tuple[s
             url = _order_url(order)
             if url:
                 urls[("order", order.id)] = url
+        missing = order_ids - {entity_id for entity_type, entity_id in urls if entity_type == "order"}
+        if missing:
+            for old_id, order in session.execute(
+                select(OrderRedirect.old_order_id, Order)
+                .join(Order, Order.id == OrderRedirect.order_id)
+                .where(OrderRedirect.old_order_id.in_(missing))
+            ):
+                url = _order_url(order)
+                if url:
+                    urls[("order", old_id)] = url
 
     item_ids = by_type.get("order_item", set())
     if item_ids:

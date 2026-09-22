@@ -20,7 +20,7 @@ def migrated_schema_is_complete():
     with engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         faculty_count = connection.execute(text("SELECT count(*) FROM faculty")).scalar_one()
-    assert revision == "20260921_07"
+    assert revision == "20260922_09"
     assert faculty_count == 17
 
 
@@ -29,7 +29,7 @@ def clean_database():
     table_names = [
         "audit_log", "document", "annual_demand", "order_item", "orders",
         "application_faculty", "application", "additional_agreement",
-        "contract_faculty", "contract", "specialty", "organization",
+        "contract_faculty", "contract_redirect", "order_redirect", "contract", "specialty", "organization",
         "faculty", "app_setting", "app_user",
     ]
     tables = ", ".join(f'"{name}"' for name in table_names)
