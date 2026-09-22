@@ -2,6 +2,8 @@ data/*
 !data/.gitkeep
 uploads/*
 !uploads/.gitkeep
+backups/*
+!backups/.gitkeep
 templates/dop_soglashenie.docx
 __pycache__/
 docx_inspect/
