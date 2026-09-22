@@ -44,7 +44,7 @@ def test_organization_card_prioritizes_and_highlights_context_contracts(session,
 
     assert response.status_code == 200
     html = response.text
-    assert html.index(context_new.number) < html.index(context_old.number) < html.index(unrelated_newest.number)
+    assert html.index(context_old.number) < html.index(context_new.number) < html.index(unrelated_newest.number)
     assert html.count("faculty-context-contract") == 2
     assert html.count("Ваш факультет") == 2
     assert "faculty-context-name" in html
@@ -79,4 +79,3 @@ def test_unknown_or_unrelated_faculty_context_has_no_highlight(session, organiza
     assert response.status_code == 200
     assert "faculty-context-contract" not in response.text
     assert "Ваш факультет" not in response.text
-

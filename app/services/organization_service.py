@@ -1,13 +1,33 @@
 from datetime import date, datetime, timezone
+from dataclasses import dataclass
 
 from sqlalchemy import extract, func, or_
+from sqlalchemy.orm import selectinload
 
 from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, ContractFaculty, Document, Faculty, Order, OrderItem, Organization, Specialty
 from .audit_service import AuditAction, audited, current_audit_batch
 
 
+FACULTY_NAME_ALIASES = {
+    "Маркетинга, менеджмента и предпринимательства": "Маркетинга, менеджмента, предпринимательства",
+}
+
+
+@dataclass(frozen=True)
+class RegistryRow:
+    contract: Contract
+    faculty: Faculty
+    specialty_codes: list[str]
+    faculty_count: int
+
+
+def canonical_faculty_name(name: str) -> str:
+    normalized = name.strip()
+    return FACULTY_NAME_ALIASES.get(normalized, normalized)
+
+
 def get_or_create_faculty(session, name):
-    name = name.strip() or "Не указан"
+    name = canonical_faculty_name(name) or "Не указан"
     faculty = session.query(Faculty).filter_by(name=name).first()
     if not faculty:
         faculty = Faculty(name=name)
@@ -48,27 +68,43 @@ def get_or_create_specialty(session, code, qualification="", faculty=""):
 
 
 def registry(session, query_text="", faculty="", end_year=""):
-    query = session.query(Contract).join(Organization).join(ContractFaculty, ContractFaculty.contract_id == Contract.id).join(Faculty, Faculty.id == ContractFaculty.faculty_id).outerjoin(Order, Order.contract_id == Contract.id).outerjoin(OrderItem).outerjoin(Specialty)
-    if query_text:
-        query = query.filter(or_(Organization.short_name.ilike(f"%{query_text}%"), Contract.number.ilike(f"%{query_text}%"), Specialty.code.ilike(f"%{query_text}%")))
+    all_faculties = session.query(Faculty).order_by(Faculty.name).all()
+    faculties = [row.name for row in all_faculties]
+    faculty_by_id = {row.id: row for row in all_faculties}
+    rows = []
+    counts = {name: 0 for name in faculties}
+    contracts = (session.query(Contract).options(
+        selectinload(Contract.organization),
+        selectinload(Contract.faculty_links).selectinload(ContractFaculty.faculty),
+        selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.specialty_ref),
+        selectinload(Contract.agreements),
+    ).order_by(Contract.id).all())
+    needle = query_text.casefold().strip()
+    for contract in contracts:
+        by_faculty = {}
+        for item in contract.items:
+            if item.faculty_id is not None:
+                by_faculty.setdefault(item.faculty_id, []).append(item.specialty)
+        # Keep manually registered contracts visible before their first order line.
+        if not by_faculty:
+            by_faculty = {link.faculty_id: [] for link in contract.faculty_links}
+        for faculty_id, codes in by_faculty.items():
+            if faculty_id in faculty_by_id:
+                counts[faculty_by_id[faculty_id].name] += 1
+        if end_year and end_year.isdigit() and (not contract.end_date or contract.end_date.year != int(end_year)):
+            continue
+        for faculty_id, codes in by_faculty.items():
+            faculty_ref = faculty_by_id.get(faculty_id)
+            if not faculty_ref or (faculty and faculty_ref.name != faculty):
+                continue
+            if needle and not (needle in contract.organization.name.casefold() or needle in contract.number.casefold()
+                               or any(needle in code.casefold() for code in codes)):
+                continue
+            rows.append(RegistryRow(contract, faculty_ref, list(dict.fromkeys(codes)), len(by_faculty)))
     if faculty:
-        query = query.filter(Faculty.name == faculty)
-    if end_year and end_year.isdigit():
-        query = query.filter(extract("year", Contract.end_date) == int(end_year))
-    contracts = query.distinct().order_by(Contract.id).all()
-    if faculty:
-        # Stable grouping: faculty-only contracts first, multi-faculty ones
-        # second. The existing order within both groups is preserved.
-        contracts.sort(key=lambda contract: len(contract.faculty_links) > 1)
-    faculties = [row[0] for row in session.query(Faculty.name).order_by(Faculty.name)]
-    counts = dict(
-        session.query(Faculty.name, func.count(func.distinct(ContractFaculty.contract_id)))
-        .join(ContractFaculty)
-        .group_by(Faculty.name)
-        .all()
-    )
+        rows.sort(key=lambda row: row.faculty_count > 1)
     end_years = [row[0] for row in session.query(extract("year", Contract.end_date)).filter(Contract.end_date.is_not(None)).distinct().order_by(extract("year", Contract.end_date))]
-    return contracts, faculties, counts, end_years, len(contracts)
+    return rows, faculties, counts, end_years, len(contracts)
 
 
 def organization_contracts(organization, faculty_id=None):
@@ -79,7 +115,8 @@ def organization_contracts(organization, faculty_id=None):
         belongs_to_context = context_id is not None and any(
             link.faculty_id == context_id for link in contract.faculty_links
         )
-        return belongs_to_context, contract.start_date or date.min, contract.id
+        only_this_faculty = belongs_to_context and len(contract.faculty_links) == 1
+        return only_this_faculty, belongs_to_context, contract.start_date or date.min, contract.id
 
     return sorted(organization.contracts, key=sort_key, reverse=True)
 
@@ -112,11 +149,14 @@ def delete_organization(session, organization: Organization):
 
 @audited
 def create_contract(session, organization_id, faculties, number, end_date):
+    normalized_number = number.strip() or "Без номера"
+    if session.query(Contract.id).filter_by(organization_id=organization_id, number=normalized_number).first():
+        raise ValueError("Договор с таким номером у этой организации уже существует.")
     names = faculties if isinstance(faculties, list) else [faculties]
     selected = [get_or_create_faculty(session, name) for name in names if name.strip()]
     if not selected:
         selected = [get_or_create_faculty(session, "Не указан")]
-    contract = Contract(organization_id=organization_id, number=number or "Без номера", start_date=date.today(),
+    contract = Contract(organization_id=organization_id, number=normalized_number, start_date=date.today(),
                         end_date=date.fromisoformat(end_date) if end_date else None,
                         status="Активен")
     session.add(contract)
@@ -128,7 +168,11 @@ def create_contract(session, organization_id, faculties, number, end_date):
 
 @audited
 def update_contract(session, contract: Contract, number: str, start_date: str, end_date: str, faculties):
-    contract.number = number.strip() or "Без номера"
+    normalized_number = number.strip() or "Без номера"
+    if session.query(Contract.id).filter(Contract.organization_id == contract.organization_id,
+                                          Contract.number == normalized_number, Contract.id != contract.id).first():
+        raise ValueError("Договор с таким номером у этой организации уже существует.")
+    contract.number = normalized_number
     contract.start_date = date.fromisoformat(start_date)
     contract.end_date = date.fromisoformat(end_date) if end_date else None
     names = {name.strip() for name in faculties if name.strip()}
@@ -136,6 +180,9 @@ def update_contract(session, contract: Contract, number: str, start_date: str, e
     if len(selected) != len(names):
         raise ValueError("Выбран неизвестный факультет.")
     selected_ids = {faculty.id for faculty in selected}
+    occupied = {item.faculty_id for item in contract.items if item.faculty_id is not None}
+    if occupied - selected_ids:
+        raise ValueError("Нельзя убрать факультет, пока в его заказе есть специальности.")
     existing = {link.faculty_id: link for link in contract.faculty_links}
     for faculty in selected:
         if faculty.id not in existing:
@@ -151,9 +198,15 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
     values = {int(key.removeprefix("demand_")): int(value) if str(value).strip().isdigit() else 0
               for key, value in form_data.items() if key.startswith("demand_")}
     contract = session.get(Contract, contract_id)
+    allowed = {link.faculty_id for link in contract.faculty_links}
+    default_faculty = next(iter(allowed)) if len(allowed) == 1 else 0
+    faculty_id = int(form_data.get("faculty_id") or (item.faculty_id if item else 0) or default_faculty)
+    if faculty_id not in allowed:
+        raise ValueError("Выберите факультет из списка факультетов договора.")
     specialty_ref = get_or_create_specialty(session, specialty, qualification, ", ".join(contract.faculty_names))
     item = item or OrderItem(order_id=get_or_create_order(session, contract, user_id).id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
+    item.faculty_id = faculty_id
     for year, quantity in values.items():
         demand = next((row for row in item.annual_demands if row.year == year), None)
         if demand:
@@ -212,7 +265,7 @@ def register_additional_agreement(session, contract: Contract, number: str, agre
     copied_entities = [copied]
     copied_items = []
     for source_item in source_order.items:
-        item = OrderItem(order=copied, specialty_id=source_item.specialty_id,
+        item = OrderItem(order=copied, specialty_id=source_item.specialty_id, faculty_id=source_item.faculty_id,
                          qualification_value=source_item.qualification_value, profile=source_item.profile)
         session.add(item)
         copied_entities.append(item)
@@ -280,7 +333,7 @@ def compare_agreement_order(session, agreement: AdditionalAgreement):
 
     def values(order):
         return {
-            item.specialty: {
+            (item.faculty_id, item.specialty): {
                 "qualification": item.qualification,
                 "profile": item.profile or "",
                 "demand": {demand.year: demand.quantity for demand in item.annual_demands},
@@ -290,8 +343,8 @@ def compare_agreement_order(session, agreement: AdditionalAgreement):
 
     before, after = values(previous), values(current)
     rows = []
-    for specialty in sorted(set(before) | set(after)):
-        old, new = before.get(specialty), after.get(specialty)
+    for faculty_id, specialty in sorted(set(before) | set(after), key=lambda key: (key[0] or 0, key[1])):
+        old, new = before.get((faculty_id, specialty)), after.get((faculty_id, specialty))
         if old is None:
             change = "Добавлено"
         elif new is None:
@@ -300,5 +353,6 @@ def compare_agreement_order(session, agreement: AdditionalAgreement):
             change = "Изменено"
         else:
             change = "Без изменений"
-        rows.append({"specialty": specialty, "before": old, "after": new, "change": change})
+        faculty_ref = session.get(Faculty, faculty_id) if faculty_id else None
+        rows.append({"faculty": faculty_ref.name if faculty_ref else "—", "specialty": specialty, "before": old, "after": new, "change": change})
     return rows, years
