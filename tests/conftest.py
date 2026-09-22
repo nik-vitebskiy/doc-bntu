@@ -20,7 +20,7 @@ def migrated_schema_is_complete():
     with engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         faculty_count = connection.execute(text("SELECT count(*) FROM faculty")).scalar_one()
-    assert revision == "20260921_07"
+    assert revision == "20260922_08"
     assert faculty_count == 17
 
 
