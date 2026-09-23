@@ -187,6 +187,7 @@ class Order(Base):
     contract: Mapped[Contract | None] = relationship(back_populates="orders")
     additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="orders")
     application: Mapped[Application | None] = relationship(back_populates="orders")
+    creator: Mapped[AppUser] = relationship(foreign_keys=[created_by])
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
 
 

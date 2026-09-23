@@ -37,6 +37,7 @@ from .services.file_service import (
     restore_attachment,
     stream_attachment,
 )
+from .services.order_history_service import compare_revisions, get_order_history, get_revision, order_table
 from .services.status_service import URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .template_builder import make_template
 logger = logging.getLogger("uvicorn.error")
@@ -370,6 +371,7 @@ def audit_registry(
     request: Request,
     user: str = "",
     entity: str = "",
+    entity_id: int | None = None,
     action: str = "",
     date_from: str = "",
     date_to: str = "",
@@ -387,6 +389,7 @@ def audit_registry(
         session,
         user=user,
         entity=entity,
+        entity_id=entity_id,
         action=action,
         date_from=parse_date(date_from),
         date_to=parse_date(date_to),
@@ -398,6 +401,7 @@ def audit_registry(
         key: value for key, value in {
             "user": user,
             "entity": entity,
+            "entity_id": entity_id,
             "action": action,
             "date_from": date_from,
             "date_to": date_to,
@@ -410,6 +414,7 @@ def audit_registry(
         "entity_filters": ENTITY_FILTERS,
         "selected_user": user,
         "selected_entity": entity,
+        "selected_entity_id": entity_id,
         "selected_action": action,
         "date_from": date_from,
         "date_to": date_to,
@@ -671,6 +676,53 @@ def agreement_comparison(request: Request, agreement_id: int, file_error: str = 
     response = views.TemplateResponse(request, "agreement_comparison.html", {"agreement": agreement, "rows": rows, "years": years, "file_error": file_error})
     s.close()
     return response
+
+
+def render_order_history(
+    request: Request,
+    document_type: str,
+    document_id: int,
+    revision_id: int | None,
+    compare_to: int | None,
+):
+    session = db()
+    history = get_order_history(session, document_type, document_id)
+    if not history:
+        session.close()
+        raise HTTPException(404)
+    selected = get_revision(history, revision_id)
+    if revision_id is not None and not selected:
+        session.close()
+        raise HTTPException(404, "Редакция не относится к этому документу")
+    rows, years = order_table(selected.order) if selected else ([], [])
+    comparison = compare_revisions(session, history, selected.order.id, compare_to) if selected and compare_to else None
+    if compare_to is not None and comparison is None:
+        session.close()
+        raise HTTPException(404, "Редакция для сравнения не относится к этому документу")
+    response = views.TemplateResponse(request, "order_history.html", {
+        "history": history,
+        "selected_revision": selected,
+        "order_rows": rows,
+        "years": years,
+        "comparison": comparison,
+    })
+    session.close()
+    return response
+
+
+@app.get("/contracts/{contract_id}/order-history", response_class=HTMLResponse)
+def contract_order_history(request: Request, contract_id: int, revision_id: int | None = None, compare_to: int | None = None):
+    return render_order_history(request, "contract", contract_id, revision_id, compare_to)
+
+
+@app.get("/additional-agreements/{agreement_id}/order-history", response_class=HTMLResponse)
+def agreement_order_history(request: Request, agreement_id: int, revision_id: int | None = None, compare_to: int | None = None):
+    return render_order_history(request, "additional_agreement", agreement_id, revision_id, compare_to)
+
+
+@app.get("/applications/{application_id}/order-history", response_class=HTMLResponse)
+def application_order_history(request: Request, application_id: int, revision_id: int | None = None, compare_to: int | None = None):
+    return render_order_history(request, "application", application_id, revision_id, compare_to)
 
 @app.post("/contracts/{contract_id}/items")
 async def add_item(contract_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):

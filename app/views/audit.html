@@ -9,6 +9,7 @@
 
 <section class="card audit-card">
   <form class="audit-filters" method="get" action="/audit">
+    {% if selected_entity_id %}<input type="hidden" name="entity_id" value="{{ selected_entity_id }}">{% endif %}
     <label>Сотрудник
       <select name="user">
         <option value="">Все сотрудники</option>
@@ -38,7 +39,7 @@
 </section>
 
 <section class="card audit-card">
-  <div class="audit-summary">Найдено записей: <b>{{ registry.total }}</b></div>
+  <div class="audit-summary">Найдено записей: <b>{{ registry.total }}</b>{% if selected_entity_id %} · редакция заказа №{{ selected_entity_id }}{% endif %}</div>
   <div class="tablewrap">
     <table class="audit-table">
       <thead><tr><th>Дата и время</th><th>Сотрудник</th><th>Действие</th><th>Объект</th><th>Комментарий</th><th aria-label="Раскрыть"></th></tr></thead>

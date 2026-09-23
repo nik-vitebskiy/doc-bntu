@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back" href="{{ history.back_url }}">← Назад к документу</a>
+<div class="titlebar"><div><h1>{{ history.title }}</h1><p>Все сохранённые редакции заказа — от действующей к исходной.</p></div></div>
+
+<section class="order-history-layout">
+  <div class="card revision-list">
+    <h2>Редакции</h2>
+    {% for revision in history.revisions %}
+      <a class="revision-card{{ ' active' if selected_revision and selected_revision.order.id == revision.order.id }}" href="?revision_id={{ revision.order.id }}">
+        <span class="revision-title">Редакция {{ revision.number }}{% if revision.is_current %}<mark class="status active">действует</mark>{% endif %}</span>
+        <strong>{{ revision.origin_label }}</strong>
+        {% if revision.number == 1 %}<small>Исходный заказ</small>{% endif %}
+        <small>Статус: {{ 'действующая' if revision.is_current else 'заменена' }}</small>
+        <small>{{ revision.created_at.strftime('%d.%m.%Y %H:%M') }} · {{ revision.creator_name }}</small>
+        <small>Строк заказа: {{ revision.item_count }}</small>
+      </a>
+    {% else %}<p class="muted">Редакций заказа пока нет.</p>{% endfor %}
+  </div>
+
+  <div class="revision-content">
+    {% if selected_revision %}
+      <section class="card revision-header">
+        <div><h2>Редакция {{ selected_revision.number }}</h2><p>{{ selected_revision.origin_label }} · {{ 'Действующая' if selected_revision.is_current else 'Заменена' }}</p></div>
+        <div class="revision-actions"><a class="button secondary compact" href="/audit?entity=order&entity_id={{ selected_revision.order.id }}">Открыть события в журнале</a></div>
+        {% if history.revisions|length > 1 %}<form class="compare-form" method="get"><input type="hidden" name="revision_id" value="{{ selected_revision.order.id }}"><label>Сравнить с<select name="compare_to" required><option value="">Выберите редакцию</option>{% for revision in history.revisions if revision.order.id != selected_revision.order.id %}<option value="{{ revision.order.id }}" {{ 'selected' if comparison and (comparison[0].order.id == revision.order.id or comparison[1].order.id == revision.order.id) }}>Редакция {{ revision.number }} — {{ revision.origin_label }}</option>{% endfor %}</select></label><button>Сравнить</button></form>{% endif %}
+      </section>
+
+      <section class="card"><h2>Состав заказа</h2><div class="tablewrap"><table><thead><tr><th>Факультет</th><th>Специальность</th><th>Квалификация</th>{% for year in years %}<th>{{ year }}</th>{% endfor %}</tr></thead><tbody>{% for row in order_rows %}<tr><td>{{ row.faculty }}</td><td>{{ row.specialty }}</td><td>{{ row.qualification }}{% if row.profile %}, {{ row.profile }}{% endif %}</td>{% for year in years %}<td>{{ row.demand.get(year, 0) }}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{ 3 + years|length }}" class="muted">В этой редакции нет строк заказа.</td></tr>{% endfor %}</tbody></table></div></section>
+
+      {% if comparison %}{% set before = comparison[0] %}{% set after = comparison[1] %}{% set diff_rows = comparison[2] %}{% set diff_years = comparison[3] %}<section class="card revision-comparison"><h2>Сравнение редакций {{ before.number }} → {{ after.number }}</h2><p>{{ before.origin_label }} → {{ after.origin_label }}</p><div class="tablewrap"><table><thead><tr><th>Факультет</th><th>Специальность</th><th>Изменение</th><th>Было</th><th>Стало</th></tr></thead><tbody>{% for row in diff_rows %}<tr><td>{{ row.faculty }}</td><td>{{ row.specialty }}</td><td><mark class="{{ row.change|order_change_class }}">{{ row.change }}</mark></td><td>{% if row.before %}{{ row.before.qualification }}{% if row.before.profile %}, {{ row.before.profile }}{% endif %}<br>{% for year in diff_years %}{{ year }}: {{ row.before.demand.get(year, 0) }}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}—{% endif %}</td><td>{% if row.after %}{{ row.after.qualification }}{% if row.after.profile %}, {{ row.after.profile }}{% endif %}<br>{% for year in diff_years %}{{ year }}: {{ row.after.demand.get(year, 0) }}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

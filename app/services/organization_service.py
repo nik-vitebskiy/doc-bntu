@@ -333,12 +333,8 @@ def register_additional_agreement(session, contract: Contract, number: str, agre
     return agreement
 
 
-def compare_agreement_order(session, agreement: AdditionalAgreement):
-    """Return a human-readable difference between an agreement's order and its predecessor."""
-    current = next(iter(agreement.orders), None)
-    if not current or not current.previous_order_id:
-        return [], []
-    previous = session.get(Order, current.previous_order_id)
+def compare_orders(session, previous: Order, current: Order):
+    """Compare any two order revisions using the canonical diff format."""
     years = sorted({demand.year for order in (previous, current) for item in order.items for demand in item.annual_demands})
 
     def values(order):
@@ -366,3 +362,12 @@ def compare_agreement_order(session, agreement: AdditionalAgreement):
         faculty_ref = session.get(Faculty, faculty_id) if faculty_id else None
         rows.append({"faculty": faculty_ref.name if faculty_ref else "—", "specialty": specialty, "before": old, "after": new, "change": change})
     return rows, years
+
+
+def compare_agreement_order(session, agreement: AdditionalAgreement):
+    """Return a human-readable difference between an agreement's order and its predecessor."""
+    current = next(iter(agreement.orders), None)
+    if not current or not current.previous_order_id:
+        return [], []
+    previous = session.get(Order, current.previous_order_id)
+    return compare_orders(session, previous, current)
