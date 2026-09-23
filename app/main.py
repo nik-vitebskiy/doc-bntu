@@ -20,7 +20,7 @@ from .services.auth_service import (
     update_user,
     verify_password,
 )
-from .services.application_service import application_registry, create_application, save_application_item, update_application
+from .services.application_service import create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
 from .services.admin_service import get_bntu_requisites, update_bntu_requisites
@@ -38,7 +38,8 @@ from .services.file_service import (
     stream_attachment,
 )
 from .services.order_history_service import compare_revisions, get_order_history, get_revision, order_table
-from .services.status_service import URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
+from .services.document_registry_service import application_registry as get_application_registry, contract_registry as get_contract_registry
+from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .template_builder import make_template
 logger = logging.getLogger("uvicorn.error")
 
@@ -467,10 +468,77 @@ def registry(
     s.close()
     return response
 
+@app.get("/contracts", response_class=HTMLResponse)
+def contracts_registry(
+    request: Request,
+    q: str = "",
+    faculty: str = "",
+    status: str = "",
+    end_year: str = "",
+    urgency: str = "",
+    urgency_choice: str | None = None,
+    page: int = 1,
+):
+    valid_urgencies = {key for key, _label in URGENCY_BUCKETS}
+    urgency = urgency if urgency in valid_urgencies else ""
+    if urgency_choice is not None:
+        choice = urgency_choice if urgency_choice in valid_urgencies else ""
+        selected = "" if choice == urgency else choice
+        query = urlencode({key: value for key, value in {
+            "q": q, "faculty": faculty, "status": status, "end_year": end_year, "urgency": selected,
+        }.items() if value})
+        return RedirectResponse(f"/contracts?{query}" if query else "/contracts", status_code=303)
+    session = db()
+    registry, faculties, end_years, urgency_counts, selected_urgency = get_contract_registry(
+        session,
+        query_text=q,
+        faculty=faculty,
+        status=status,
+        end_year=end_year,
+        urgency=urgency,
+        page=page,
+    )
+    pagination_query = urlencode({key: value for key, value in {
+        "q": q, "faculty": faculty, "status": status, "end_year": end_year, "urgency": selected_urgency,
+    }.items() if value})
+    response = views.TemplateResponse(request, "contracts.html", {
+        "registry": registry,
+        "faculties": faculties,
+        "end_years": end_years,
+        "statuses": CONTRACT_STATUSES,
+        "urgency_buckets": URGENCY_BUCKETS,
+        "urgency_counts": urgency_counts,
+        "selected_urgency": selected_urgency,
+        "selected_faculty": faculty,
+        "selected_status": status,
+        "selected_end_year": end_year,
+        "q": q,
+        "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+    })
+    session.close()
+    return response
+
+
 @app.get("/applications", response_class=HTMLResponse)
-def applications(request: Request, q: str = "", faculty: str = ""):
-    s = db(); rows, faculties = application_registry(s, q, faculty)
-    return views.TemplateResponse(request, "applications.html", {"applications": rows, "faculties": faculties, "q": q, "selected_faculty": faculty})
+def applications(request: Request, q: str = "", faculty: str = "", status: str = "", page: int = 1):
+    session = db()
+    registry, faculties = get_application_registry(
+        session, query_text=q, faculty=faculty, status=status, page=page,
+    )
+    pagination_query = urlencode({key: value for key, value in {
+        "q": q, "faculty": faculty, "status": status,
+    }.items() if value})
+    response = views.TemplateResponse(request, "applications.html", {
+        "registry": registry,
+        "faculties": faculties,
+        "statuses": APPLICATION_STATUSES,
+        "q": q,
+        "selected_faculty": faculty,
+        "selected_status": status,
+        "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+    })
+    session.close()
+    return response
 
 @app.get("/organizations/{org_id}/applications/new", response_class=HTMLResponse)
 def new_application(request: Request, org_id: int):

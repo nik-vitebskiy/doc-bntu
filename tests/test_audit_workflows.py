@@ -7,10 +7,12 @@ from sqlalchemy import event, func, select
 
 from app.models import (
     AdditionalAgreement,
+    AppUser,
     AuditLog,
     Contract,
     DocumentAttachment,
     Order,
+    Organization,
 )
 from app.services.audit_registry_service import get_audit_registry
 from app.services.audit_service import AuditActor
@@ -214,5 +216,9 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
         select(AuditLog).where(AuditLog.entity_type == "excel_import", AuditLog.entity_label.contains("system-import"))
     ).one()
     assert system_event.user_id is None
+    assert session.scalars(select(AppUser).where(AppUser.username == "demo")).first() is None
+    assert session.scalars(
+        select(Order).join(Organization).where(Organization.unp == "999200002")
+    ).one().created_by is None
     registry = get_audit_registry(session, user="system", action="FILE_UPLOAD")
     assert any(row.id == system_event.id and row.employee == "Система" for row in registry.rows)

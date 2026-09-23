@@ -1,21 +1,8 @@
 from datetime import date
 
-from sqlalchemy import func, or_
-
-from ..models import AnnualDemand, Application, ApplicationFaculty, Faculty, Order, OrderItem, Organization
+from ..models import AnnualDemand, Application, ApplicationFaculty, Order, OrderItem
 from .audit_service import audited
 from .organization_service import get_or_create_faculty, get_or_create_specialty
-
-
-def application_registry(session, query_text="", faculty=""):
-    query = session.query(Application).join(Organization).join(ApplicationFaculty).join(Faculty)
-    if query_text:
-        query = query.filter(or_(Application.number.ilike(f"%{query_text}%"), Organization.short_name.ilike(f"%{query_text}%")))
-    if faculty:
-        query = query.filter(Faculty.name == faculty)
-    applications = query.distinct().order_by(Application.received_date.desc(), Application.id.desc()).all()
-    faculties = [row[0] for row in session.query(Faculty.name).order_by(Faculty.name)]
-    return applications, faculties
 
 
 @audited

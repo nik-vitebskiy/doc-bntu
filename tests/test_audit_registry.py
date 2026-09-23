@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from app.models import AuditLog, ContractRedirect, OrderRedirect
-from app.services.audit_registry_service import get_audit_registry
+from app.models import AppUser, AuditLog, ContractRedirect, OrderRedirect
+from app.services.audit_registry_service import ACTION_LABELS, get_audit_registry
 from app.services.organization_service import delete_organization, get_or_create_order
 
 
@@ -66,6 +66,17 @@ def test_login_is_hidden_by_default_and_visible_by_filter(session, user):
     assert [row.id for row in default_page.rows] == [update.id]
     login_page = get_audit_registry(session, action="LOGIN")
     assert [row.id for row in login_page.rows] == [login.id]
+
+
+def test_development_actions_and_demo_user_are_not_filter_options(session):
+    session.add(AppUser(username="demo", password_hash="unused", full_name="Техническая учётка"))
+    session.commit()
+
+    registry = get_audit_registry(session)
+
+    assert "ACTIVATE" not in ACTION_LABELS
+    assert "SEED_TEST_DATA" not in ACTION_LABELS
+    assert all(user.username != "demo" for user in registry.users)
 
 
 def test_pagination_is_fifty_and_newest_first(session, user):

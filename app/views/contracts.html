@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="titlebar"><div><h1>Договоры</h1><p>Все договоры организаций-заказчиков</p></div></div>
+{% set registry_kind = 'contracts' %}
+{% set registry_item_genitive = 'договора' %}
+{% set registry_items_genitive = 'договоров' %}
+<section class="card registry-card">
+  {% include '_document_registry_filters.html' %}
+  {% include '_document_registry_table.html' %}
+</section>
+{% endblock %}

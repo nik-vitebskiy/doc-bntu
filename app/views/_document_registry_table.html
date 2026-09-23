@@ -1,0 +1,37 @@
+<div class="registry-summary">Найдено {{ registry_items_genitive }}: <b>{{ registry.total }}</b></div>
+<div class="tablewrap">
+  <table class="registry-table">
+    {% if registry_kind == 'contracts' %}
+      <thead><tr><th>Организация</th><th>Номер и дата договора</th><th>Факультеты</th><th>Статус</th><th>Дата окончания</th><th>Скан</th><th>Специальности</th></tr></thead>
+      <tbody>
+      {% for row in registry.rows %}{% set contract = row.contract %}
+        <tr class="clickable-row" onclick="location='/organizations/{{ contract.organization_id }}#contract-{{ contract.id }}'">
+          <td><a href="/organizations/{{ contract.organization_id }}" onclick="event.stopPropagation()"><b>{{ contract.organization.name }}</b></a></td>
+          <td><b>{{ contract.number or '—' }}</b><small>от {{ contract.start_date.strftime('%d.%m.%Y') }}</small></td>
+          <td>{{ contract.faculty_names|join(', ') or '—' }}</td>
+          <td><mark class="{{ row.effective_status|status_class }}">{{ row.effective_status|document_status }}</mark></td>
+          <td><span class="date {{ row.expiry.css_class if row.expiry else 'neutral' }}">{{ contract.end_date.strftime('%d.%m.%Y') if contract.end_date else 'Не указана' }}</span>{% if row.expiry and row.expiry.overdue %}<small class="overdue-label">просрочен</small>{% endif %}</td>
+          <td>{% if contract.has_signed_scan %}<span class="signed-file-indicator" title="Есть подписанный скан" aria-label="Есть подписанный скан">▣</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{{ row.specialty_count }}</td>
+        </tr>
+      {% else %}<tr><td colspan="7" class="registry-empty">По выбранным условиям договоры не найдены.</td></tr>{% endfor %}
+      </tbody>
+    {% else %}
+      <thead><tr><th>Номер заявки</th><th>Организация</th><th>Дата получения</th><th>Дата подписания</th><th>Факультеты</th><th>Статус</th><th>Скан</th></tr></thead>
+      <tbody>
+      {% for application in registry.rows %}
+        <tr class="clickable-row" onclick="location='/applications/{{ application.id }}'">
+          <td><b>{{ application.number or 'Не присвоен' }}</b></td>
+          <td><a href="/organizations/{{ application.organization_id }}" onclick="event.stopPropagation()"><b>{{ application.organization.name }}</b></a></td>
+          <td>{{ application.received_date.strftime('%d.%m.%Y') }}</td>
+          <td>{{ application.signed_date.strftime('%d.%m.%Y') if application.signed_date else 'Не подписана' }}</td>
+          <td>{{ application.faculty_names|join(', ') or '—' }}</td>
+          <td><mark class="{{ application.status|status_class }}">{{ application.status|document_status }}</mark></td>
+          <td>{% if application.has_signed_scan %}<span class="signed-file-indicator" title="Есть подписанный скан" aria-label="Есть подписанный скан">▣</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        </tr>
+      {% else %}<tr><td colspan="7" class="registry-empty">По выбранным условиям заявки не найдены.</td></tr>{% endfor %}
+      </tbody>
+    {% endif %}
+  </table>
+</div>
+{% include '_registry_pagination.html' %}
