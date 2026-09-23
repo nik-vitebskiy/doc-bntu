@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from app.main import app
 from app.models import (
     Application,
     Contract,
@@ -116,7 +117,7 @@ def test_application_registry_combines_search_faculty_status_and_scan(
         ["Факультет заявок"],
         "2026-09-23",
         "ЗАЯВКА-01",
-        "",
+        "2026-09-24",
         user.id,
         audit_actor=actor,
     )
@@ -156,6 +157,20 @@ def test_application_registry_combines_search_faculty_status_and_scan(
     assert f"/applications/{target.id}" in response.text
     assert f"/organizations/{organization.id}" in response.text
     assert "Есть подписанный скан" in response.text
+    assert "Дата подписания" in response.text
+    assert "24.09.2026" in response.text
+
+    card = client.get(f"/applications/{target.id}")
+    assert card.status_code == 200
+    assert 'href="/applications"' in card.text
+
+
+def test_applications_registry_has_one_get_route():
+    routes = [
+        route for route in app.routes
+        if getattr(route, "path", None) == "/applications" and "GET" in getattr(route, "methods", set())
+    ]
+    assert len(routes) == 1
 
 
 def test_contract_registry_paginates_by_fifty(session, organization):

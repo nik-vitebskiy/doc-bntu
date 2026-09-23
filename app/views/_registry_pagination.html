@@ -1,0 +1,7 @@
+{% if registry.pages > 1 %}
+<nav class="pagination" aria-label="Страницы {{ registry_items_genitive }}">
+  {% if registry.page > 1 %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page - 1 }}">← Назад</a>{% endif %}
+  <span>Страница {{ registry.page }} из {{ registry.pages }}</span>
+  {% if registry.page < registry.pages %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page + 1 }}">Вперёд →</a>{% endif %}
+</nav>
+{% endif %}

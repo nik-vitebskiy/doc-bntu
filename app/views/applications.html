@@ -1,26 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="titlebar"><div><h1>Заявки</h1><p>Все полученные заявки организаций-заказчиков</p></div></div>
+{% set registry_kind = 'applications' %}
+{% set registry_item_genitive = 'заявки' %}
+{% set registry_items_genitive = 'заявок' %}
 <section class="card registry-card">
-  <form class="filters registry-filters" method="get" action="/applications">
-    <input name="q" value="{{ q }}" placeholder="Организация или номер заявки">
-    <select name="faculty"><option value="">Все факультеты</option>{% for faculty in faculties %}<option value="{{ faculty }}" {{ 'selected' if faculty == selected_faculty }}>{{ faculty }}</option>{% endfor %}</select>
-    <select name="status"><option value="">Все статусы</option>{% for status in statuses %}<option value="{{ status }}" {{ 'selected' if status == selected_status }}>{{ status }}</option>{% endfor %}</select>
-    <button>Фильтровать</button>
-  </form>
-  <div class="registry-summary">Найдено заявок: <b>{{ registry.total }}</b></div>
-  <div class="tablewrap"><table class="registry-table"><thead><tr><th>Номер заявки</th><th>Организация</th><th>Дата получения</th><th>Факультеты</th><th>Статус</th><th>Скан</th></tr></thead><tbody>
-  {% for application in registry.rows %}
-    <tr class="clickable-row" onclick="location='/applications/{{ application.id }}'">
-      <td><b>{{ application.number or 'Не присвоен' }}</b></td>
-      <td><a href="/organizations/{{ application.organization_id }}" onclick="event.stopPropagation()"><b>{{ application.organization.name }}</b></a></td>
-      <td>{{ application.received_date.strftime('%d.%m.%Y') }}</td>
-      <td>{{ application.faculty_names|join(', ') or '—' }}</td>
-      <td><mark class="{{ application.status|status_class }}">{{ application.status|document_status }}</mark></td>
-      <td>{% if application.has_signed_scan %}<span class="signed-file-indicator" title="Есть подписанный скан" aria-label="Есть подписанный скан">▣</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-    </tr>
-  {% else %}<tr><td colspan="6" class="registry-empty">По выбранным условиям заявки не найдены.</td></tr>{% endfor %}
-  </tbody></table></div>
-  {% if registry.pages > 1 %}<nav class="pagination" aria-label="Страницы заявок">{% if registry.page > 1 %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page - 1 }}">← Назад</a>{% endif %}<span>Страница {{ registry.page }} из {{ registry.pages }}</span>{% if registry.page < registry.pages %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page + 1 }}">Вперёд →</a>{% endif %}</nav>{% endif %}
+  {% include '_document_registry_filters.html' %}
+  {% include '_document_registry_table.html' %}
 </section>
 {% endblock %}
