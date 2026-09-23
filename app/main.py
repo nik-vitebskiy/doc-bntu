@@ -23,6 +23,7 @@ from .services.auth_service import (
 from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
+from .services.admin_service import get_bntu_requisites, update_bntu_requisites
 from .services.document_status_service import StatusTransitionError, allowed_status_transitions, change_agreement_status, change_application_status, change_contract_status
 from .services.file_service import delete_document
 from .services.status_service import order_change_class, status_class, status_label
@@ -53,6 +54,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "documents": ("/documents",),
         "audit": ("/audit",),
         "users": ("/users",),
+        "settings": ("/settings",),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -195,7 +197,7 @@ def save_password(
 
 def require_admin(request: Request) -> None:
     if request.state.user.role != "ADMIN":
-        raise HTTPException(403, "Управление пользователями доступно только администратору.")
+        raise HTTPException(403, "Раздел доступен только администратору.")
 
 
 @app.get("/users", response_class=HTMLResponse)
@@ -274,6 +276,52 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
         return response
     session.close()
     return RedirectResponse("/users", status_code=303)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_form(request: Request, saved: str = ""):
+    require_admin(request)
+    session = db()
+    requisites = get_bntu_requisites(session)
+    session.close()
+    return views.TemplateResponse(request, "settings.html", {
+        "requisites": requisites,
+        "saved": saved == "1",
+    })
+
+
+@app.post("/settings")
+def save_settings(
+    request: Request,
+    full_name: str = Form(""),
+    signer_position: str = Form(""),
+    signer_name: str = Form(""),
+    power_of_attorney_number: str = Form(""),
+    power_of_attorney_date: str = Form(""),
+    legal_address: str = Form(""),
+    unp: str = Form(""),
+    okpo: str = Form(""),
+    bank_account: str = Form(""),
+    bank_name: str = Form(""),
+    bic: str = Form(""),
+):
+    require_admin(request)
+    session = db()
+    update_bntu_requisites(session, {
+        "full_name": full_name,
+        "signer_position": signer_position,
+        "signer_name": signer_name,
+        "power_of_attorney_number": power_of_attorney_number,
+        "power_of_attorney_date": power_of_attorney_date,
+        "legal_address": legal_address,
+        "unp": unp,
+        "okpo": okpo,
+        "bank_account": bank_account,
+        "bank_name": bank_name,
+        "bic": bic,
+    }, audit_actor=audit_actor(request))
+    session.close()
+    return RedirectResponse("/settings?saved=1", status_code=303)
 
 
 @app.get("/audit", response_class=HTMLResponse)
@@ -623,5 +671,7 @@ def remove_document(request: Request, document_id: int):
 def agreement(contract_id: int):
     s = db(); c = s.get(Contract, contract_id)
     if not c: raise HTTPException(404)
-    target = Path("uploads") / f"Дополнительное_соглашение_{contract_id}.docx"; render_agreement(c, target)
+    target = Path("uploads") / f"Дополнительное_соглашение_{contract_id}.docx"
+    render_agreement(c, target, get_bntu_requisites(s))
+    s.close()
     return FileResponse(target, filename=target.name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
