@@ -26,7 +26,7 @@ from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_
 from .services.admin_service import get_bntu_requisites, update_bntu_requisites
 from .services.document_status_service import StatusTransitionError, allowed_status_transitions, change_agreement_status, change_application_status, change_contract_status
 from .services.file_service import delete_document
-from .services.status_service import order_change_class, status_class, status_label
+from .services.status_service import URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .template_builder import make_template
 logger = logging.getLogger("uvicorn.error")
 
@@ -65,11 +65,10 @@ def db(): return SessionLocal()
 def audit_actor(request: Request):
     client_ip = request.client.host if request.client else None
     return AuditActor(request.state.user.id, client_ip)
-def urgency(end):
-    if not end: return "neutral"
-    days = (end - date.today()).days
-    return "danger" if days <= 30 else "warning" if days <= 90 else "success"
-views.env.globals["urgency"] = urgency
+def urgency_class(end):
+    value = expiry_urgency(end)
+    return value.css_class if value else "neutral"
+views.env.globals["urgency"] = urgency_class
 
 @app.on_event("startup")
 def startup():
@@ -378,13 +377,46 @@ def audit_registry(
     })
 
 @app.get("/", response_class=HTMLResponse)
-def registry(request: Request, q: str = "", faculty: str = "", end_year: str = ""):
+def registry(
+    request: Request,
+    q: str = "",
+    faculty: str = "",
+    end_year: str = "",
+    urgency: str = "",
+    urgency_choice: str | None = None,
+):
+    valid_urgencies = {key for key, _label in URGENCY_BUCKETS}
+    urgency = urgency if urgency in valid_urgencies else ""
+    if urgency_choice is not None:
+        choice = urgency_choice if urgency_choice in valid_urgencies else ""
+        selected = "" if choice == urgency else choice
+        query = urlencode({
+            key: value for key, value in {
+                "q": q, "faculty": faculty, "end_year": end_year, "urgency": selected,
+            }.items() if value
+        })
+        return RedirectResponse(f"/?{query}" if query else "/", status_code=303)
     s = db()
-    contracts, faculties, counts, end_years, contract_count = get_registry(s, q, faculty, end_year)
+    contracts, faculties, counts, end_years, contract_count, urgency_counts = get_registry(
+        s, q, faculty, end_year, urgency,
+    )
     selected_faculty_id = None
     if faculty:
         selected_faculty_id = s.query(Faculty.id).filter(Faculty.name == faculty).scalar()
-    response = views.TemplateResponse(request, "registry.html", {"contracts": contracts, "faculties": faculties, "contract_count": contract_count, "counts": counts, "q": q, "selected_faculty": faculty, "selected_faculty_id": selected_faculty_id, "end_years": end_years, "selected_end_year": end_year})
+    response = views.TemplateResponse(request, "registry.html", {
+        "contracts": contracts,
+        "faculties": faculties,
+        "contract_count": contract_count,
+        "counts": counts,
+        "q": q,
+        "selected_faculty": faculty,
+        "selected_faculty_id": selected_faculty_id,
+        "end_years": end_years,
+        "selected_end_year": end_year,
+        "urgency_buckets": URGENCY_BUCKETS,
+        "urgency_counts": urgency_counts,
+        "selected_urgency": urgency,
+    })
     s.close()
     return response
 

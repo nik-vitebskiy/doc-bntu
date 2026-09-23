@@ -1,3 +1,7 @@
+from dataclasses import dataclass
+from datetime import date
+
+
 STATUS_ACTIVE = "Активен"
 STATUS_APPLICATION = "Заявка"
 STATUS_CLOSED = "Закрыт"
@@ -19,6 +23,37 @@ ORDER_CHANGE_CLASSES = {
 }
 
 LEGACY_STATUS_LABELS = {"ACTIVE": STATUS_ACTIVE, "CLOSED": STATUS_CLOSED}
+
+URGENCY_DUE_30 = "due_30"
+URGENCY_DUE_90 = "due_90"
+URGENCY_LATER = "later"
+URGENCY_BUCKETS = (
+    (URGENCY_DUE_30, "≤ 30 дней"),
+    (URGENCY_DUE_90, "31–90 дней"),
+    (URGENCY_LATER, "> 90 дней"),
+)
+
+
+@dataclass(frozen=True)
+class ExpiryUrgency:
+    bucket: str
+    css_class: str
+    days_left: int
+    overdue: bool
+
+
+def expiry_urgency(end_date: date | None, today: date | None = None) -> ExpiryUrgency | None:
+    """Classify a contract end date for both filtering and color display."""
+    if end_date is None:
+        return None
+    days_left = (end_date - (today or date.today())).days
+    if days_left <= 30:
+        bucket, css_class = URGENCY_DUE_30, "danger"
+    elif days_left <= 90:
+        bucket, css_class = URGENCY_DUE_90, "warning"
+    else:
+        bucket, css_class = URGENCY_LATER, "success"
+    return ExpiryUrgency(bucket, css_class, days_left, days_left < 0)
 
 
 def status_label(value: str | None) -> str:
