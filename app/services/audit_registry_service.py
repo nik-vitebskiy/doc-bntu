@@ -363,6 +363,7 @@ def get_audit_registry(
     *,
     user: str = "",
     entity: str = "",
+    entity_id: int | None = None,
     action: str = "",
     date_from: date | None = None,
     date_to: date | None = None,
@@ -380,6 +381,8 @@ def get_audit_registry(
         conditions.append(AuditLog.user_id == int(user))
     if entity in ENTITY_FILTERS:
         conditions.append(AuditLog.entity_type.in_(ENTITY_FILTERS[entity][1]))
+    if entity_id is not None:
+        conditions.extend((AuditLog.entity_type == "order", AuditLog.entity_id == entity_id))
     conditions.extend(_date_bounds(date_from, date_to))
     if query.strip():
         pattern = f"%{query.strip()}%"
