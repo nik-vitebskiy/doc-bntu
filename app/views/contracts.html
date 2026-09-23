@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="titlebar"><div><h1>Договоры</h1><p>Все договоры организаций-заказчиков</p></div></div>
+<section class="card registry-card">
+  <form class="filters registry-filters" method="get" action="/contracts">
+    <input name="q" value="{{ q }}" placeholder="Организация или номер договора">
+    <select name="faculty"><option value="">Все факультеты</option>{% for faculty in faculties %}<option value="{{ faculty }}" {{ 'selected' if faculty == selected_faculty }}>{{ faculty }}</option>{% endfor %}</select>
+    <select name="status"><option value="">Все статусы</option>{% for status in statuses %}<option value="{{ status }}" {{ 'selected' if status == selected_status }}>{{ status }}</option>{% endfor %}</select>
+    <select name="end_year"><option value="">Любой год окончания</option>{% for year in end_years %}<option value="{{ year|int }}" {{ 'selected' if selected_end_year == year|string }}>{{ year|int }}</option>{% endfor %}</select>
+    <input type="hidden" name="urgency" value="{{ selected_urgency }}">
+    <button>Фильтровать</button>
+    <div class="urgency-filters" aria-label="Срок окончания договора">{% for key, label in urgency_buckets %}<button type="submit" name="urgency_choice" value="{{ key }}" class="urgency-toggle urgency-{{ key }}{{ ' active' if selected_urgency == key }}" aria-pressed="{{ 'true' if selected_urgency == key else 'false' }}">{{ label }} <span>{{ urgency_counts.get(key, 0) }}</span></button>{% endfor %}</div>
+  </form>
+  <div class="registry-summary">Найдено договоров: <b>{{ registry.total }}</b></div>
+  <div class="tablewrap"><table class="registry-table"><thead><tr><th>Организация</th><th>Номер и дата договора</th><th>Факультеты</th><th>Статус</th><th>Дата окончания</th><th>Скан</th><th>Специальности</th></tr></thead><tbody>
+  {% for row in registry.rows %}{% set contract = row.contract %}
+    <tr class="clickable-row" onclick="location='/organizations/{{ contract.organization_id }}#contract-{{ contract.id }}'">
+      <td><a href="/organizations/{{ contract.organization_id }}" onclick="event.stopPropagation()"><b>{{ contract.organization.name }}</b></a></td>
+      <td><b>{{ contract.number or '—' }}</b><small>от {{ contract.start_date.strftime('%d.%m.%Y') }}</small></td>
+      <td>{{ contract.faculty_names|join(', ') or '—' }}</td>
+      <td><mark class="{{ row.effective_status|status_class }}">{{ row.effective_status|document_status }}</mark></td>
+      <td><span class="date {{ row.expiry.css_class if row.expiry else 'neutral' }}">{{ contract.end_date.strftime('%d.%m.%Y') if contract.end_date else 'Не указана' }}</span>{% if row.expiry and row.expiry.overdue %}<small class="overdue-label">просрочен</small>{% endif %}</td>
+      <td>{% if contract.has_signed_scan %}<span class="signed-file-indicator" title="Есть подписанный скан" aria-label="Есть подписанный скан">▣</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{{ row.specialty_count }}</td>
+    </tr>
+  {% else %}<tr><td colspan="7" class="registry-empty">По выбранным условиям договоры не найдены.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if registry.pages > 1 %}<nav class="pagination" aria-label="Страницы договоров">{% if registry.page > 1 %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page - 1 }}">← Назад</a>{% endif %}<span>Страница {{ registry.page }} из {{ registry.pages }}</span>{% if registry.page < registry.pages %}<a class="button secondary compact" href="{{ pagination_prefix }}page={{ registry.page + 1 }}">Вперёд →</a>{% endif %}</nav>{% endif %}
+</section>
+{% endblock %}
