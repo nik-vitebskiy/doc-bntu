@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlalchemy import func, or_
 
-from ..models import AnnualDemand, Application, ApplicationFaculty, Document, Faculty, Order, OrderItem, Organization
+from ..models import AnnualDemand, Application, ApplicationFaculty, Faculty, Order, OrderItem, Organization
 from .audit_service import audited
 from .organization_service import get_or_create_faculty, get_or_create_specialty
 
@@ -52,12 +52,3 @@ def save_application_item(session, application, specialty, qualification, form_d
         else: item.annual_demands.append(AnnualDemand(year=year, quantity=quantity))
     session.add(item)
     return item
-
-
-@audited
-def attach_application_scan(session, application, filename, stored_name):
-    document = Document(organization_id=application.organization_id, application_id=application.id,
-                        type="SIGNED_SCAN", status="SIGNED", file_id=stored_name,
-                        original_filename=filename)
-    session.add(document)
-    return document

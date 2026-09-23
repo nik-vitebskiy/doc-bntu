@@ -23,7 +23,7 @@ def migrated_schema_is_complete():
         bntu_name = connection.execute(text(
             "SELECT value #>> '{}' FROM app_setting WHERE key = 'bntu.full_name'"
         )).scalar_one()
-    assert revision == "20260923_10"
+    assert revision == "20260923_12"
     assert faculty_count == 17
     assert bntu_name == "Белорусский национальный технический университет"
 
@@ -31,7 +31,7 @@ def migrated_schema_is_complete():
 @pytest.fixture(autouse=True)
 def clean_database():
     table_names = [
-        "audit_log", "document", "annual_demand", "order_item", "orders",
+        "audit_log", "document_attachment", "document", "annual_demand", "order_item", "orders",
         "application_faculty", "application", "additional_agreement",
         "contract_faculty", "contract_redirect", "order_redirect", "contract", "specialty", "organization",
         "faculty", "app_setting", "app_user",

@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 from datetime import date
 from pathlib import Path
 
@@ -39,8 +40,8 @@ def _document_requisites(values: dict | None) -> dict[str, str]:
     return result
 
 
-def render_agreement(contract, out_path, requisites: dict | None = None):
-    """Generate an additional-agreement DOCX from the effective order."""
+def render_agreement_bytes(contract, requisites: dict | None = None) -> bytes:
+    """Generate an additional-agreement snapshot suitable for DB storage."""
     make_template()
     items = []
     years = set()
@@ -59,4 +60,11 @@ def render_agreement(contract, out_path, requisites: dict | None = None):
         "years": sorted(years),
         "items": items,
     })
-    doc.save(out_path)
+    output = BytesIO()
+    doc.save(output)
+    return output.getvalue()
+
+
+def render_agreement(contract, out_path, requisites: dict | None = None):
+    """Compatibility wrapper used by exports and existing tests."""
+    Path(out_path).write_bytes(render_agreement_bytes(contract, requisites))

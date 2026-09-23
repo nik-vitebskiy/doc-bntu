@@ -800,3 +800,28 @@ details form{
     grid-column:auto
   }
 }
+
+.file-block{margin-top:20px}
+.file-block h2,.file-block p{margin:0}
+.file-block-heading{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.file-list{display:grid;gap:8px;margin-bottom:14px}
+.file-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #dce5f2;border-radius:9px;background:#f9fbfe}
+.file-icon{font-size:20px;color:#3169b1}
+.file-info{display:grid;gap:3px;min-width:0;flex:1}
+.file-info a,.file-info span{overflow-wrap:anywhere}
+.file-info small{color:#71809a}
+.file-action{border:0;background:transparent;color:#1769df;cursor:pointer;padding:6px}
+.file-empty{padding:12px;color:#71809a;background:#f7f9fc;border-radius:8px}
+.file-upload{display:grid;grid-template-columns:minmax(190px,260px) minmax(260px,1fr) auto;gap:12px;align-items:end}
+.file-upload>label{display:grid;gap:6px;color:#4e5d74;font-weight:600}
+.file-dropzone{padding:12px 16px;border:1px dashed #9bb3d2;border-radius:9px;background:#f7faff;cursor:pointer;transition:.15s}
+.file-dropzone.is-dragging{border-color:#1769df;background:#eaf3ff}
+.file-dropzone input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.file-dropzone span,.file-dropzone small{display:block}
+.file-dropzone small{font-weight:400;color:#71809a;margin-top:3px;overflow-wrap:anywhere}
+.file-error{padding:10px 12px;margin-bottom:12px!important;border-radius:8px;background:#fff0f0;color:#9c2525}
+.deleted-files{margin-top:12px;color:#71809a}
+.deleted-files .file-row{margin-top:8px;opacity:.75}
+.signed-file-indicator{display:inline-block;margin-left:7px;color:#3169b1;font-size:15px}
+
+@media(max-width:800px){.file-upload{grid-template-columns:1fr}.file-upload .button{justify-self:start}}

@@ -1,16 +1,16 @@
-import json, logging, os, shutil, uuid
+import json, logging, os, tempfile
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, Document, Faculty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty
 from .services.import_service import import_xlsx
-from .services.document_service import render_agreement
-from .services.organization_service import attach_scan, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
+from .services.document_service import render_agreement_bytes
+from .services.organization_service import compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
     authenticate,
     change_password,
@@ -20,20 +20,30 @@ from .services.auth_service import (
     update_user,
     verify_password,
 )
-from .services.application_service import application_registry, attach_application_scan, create_application, save_application_item, update_application
+from .services.application_service import application_registry, create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
 from .services.admin_service import get_bntu_requisites, update_bntu_requisites
 from .services.document_status_service import StatusTransitionError, allowed_status_transitions, change_agreement_status, change_application_status, change_contract_status
-from .services.file_service import delete_document
+from .services.file_service import (
+    AttachmentError,
+    FILE_KIND_LABELS,
+    MANUAL_FILE_KINDS,
+    MAX_FILE_SIZE,
+    attachment_destination,
+    create_attachment,
+    delete_attachment,
+    get_attachment_metadata,
+    restore_attachment,
+    stream_attachment,
+)
 from .services.status_service import URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .template_builder import make_template
 logger = logging.getLogger("uvicorn.error")
 
-Path("data").mkdir(exist_ok=True); Path("uploads").mkdir(exist_ok=True)
+Path("data").mkdir(exist_ok=True)
 app = FastAPI(title="Кадровый заказ")
 app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 views = Jinja2Templates(directory="app/views")
 views.env.filters["fromjson"] = json.loads
 
@@ -42,6 +52,38 @@ views.env.filters["document_status"] = status_label
 views.env.filters["status_class"] = status_class
 views.env.filters["order_change_class"] = order_change_class
 views.env.globals["allowed_status_transitions"] = allowed_status_transitions
+views.env.globals["file_kind_labels"] = FILE_KIND_LABELS
+
+
+def human_file_size(value: int) -> str:
+    size = float(value or 0)
+    for unit in ("Б", "КБ", "МБ"):
+        if size < 1024 or unit == "МБ":
+            return f"{size:.0f} {unit}" if unit == "Б" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} МБ"
+
+
+views.env.filters["filesize"] = human_file_size
+
+
+async def read_uploaded_file(file: UploadFile) -> bytes:
+    content = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        content.extend(chunk)
+        if len(content) > MAX_FILE_SIZE:
+            raise AttachmentError("Файл превышает допустимый размер 50 МБ.")
+    return bytes(content)
+
+
+def load_attachment_relations(entity) -> None:
+    for attachment in entity.attachments:
+        _ = attachment.uploader
+
+
+def attachment_error_redirect(destination: str, error: Exception) -> RedirectResponse:
+    separator = "&" if "?" in destination else "?"
+    return RedirectResponse(f"{destination}{separator}file_error={quote(str(error))}", status_code=303)
 
 
 def nav_is_active(request: Request, section: str) -> bool:
@@ -437,11 +479,14 @@ def add_application(request: Request, org_id: int, faculty: list[str] = Form(...
     return RedirectResponse(f"/applications/{application.id}", status_code=303)
 
 @app.get("/applications/{application_id}", response_class=HTMLResponse)
-def application_card(request: Request, application_id: int):
+def application_card(request: Request, application_id: int, file_error: str = ""):
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
+    load_attachment_relations(application)
     years = list(range(date.today().year, date.today().year + 10))
-    return views.TemplateResponse(request, "application.html", {"application": application, "years": years})
+    response = views.TemplateResponse(request, "application.html", {"application": application, "years": years, "file_error": file_error})
+    s.close()
+    return response
 
 @app.post("/applications/{application_id}")
 def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form("")):
@@ -482,19 +527,21 @@ async def edit_application_item(request: Request, item_id: int, specialty: str =
     save_application_item(s, application, specialty, qualification, await request.form(), item, audit_actor=audit_actor(request))
     return RedirectResponse(f"/applications/{application.id}", status_code=303)
 
-@app.post("/applications/{application_id}/scan")
-async def add_application_scan(request: Request, application_id: int, file: UploadFile = File(...)):
+@app.post("/applications/{application_id}/files")
+async def add_application_file(request: Request, application_id: int, file_kind: str = Form(...), file: UploadFile = File(...)):
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
-    safe = Path(file.filename).name; stored = f"{uuid.uuid4()}-{safe}"
-    target = Path("uploads") / stored
-    with open(target, "wb") as out: shutil.copyfileobj(file.file, out)
     try:
-        attach_application_scan(s, application, safe, stored, audit_actor=audit_actor(request))
-    except Exception:
-        target.unlink(missing_ok=True)
+        if file_kind not in MANUAL_FILE_KINDS:
+            raise AttachmentError("Этот тип файла нельзя загружать вручную.")
+        create_attachment(
+            s, application=application, filename=file.filename or "", mime_type=file.content_type or "",
+            content=await read_uploaded_file(file), file_kind=file_kind, uploaded_by=request.state.user.id,
+            audit_actor=audit_actor(request),
+        )
+    except AttachmentError as error:
         s.close()
-        raise
+        return attachment_error_redirect(f"/applications/{application_id}", error)
     s.close()
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
@@ -502,17 +549,22 @@ async def add_application_scan(request: Request, application_id: int, file: Uplo
 async def upload_import(request: Request, file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".xlsx"): raise HTTPException(400, "Нужен файл Excel .xlsx")
     original_filename = Path(file.filename).name
-    path = Path("uploads") / f"import-{uuid.uuid4()}.xlsx"
-    with path.open("wb") as out: shutil.copyfileobj(file.file, out)
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    path = Path(handle.name)
+    try:
+        while chunk := await file.read(1024 * 1024):
+            handle.write(chunk)
+    finally:
+        handle.close()
     s = db()
     try:
         result = import_xlsx(s, path, request.state.user.id, original_filename, audit_actor=audit_actor(request))
         logger.info(result.log_line("веб"))
     except Exception:
-        path.unlink(missing_ok=True)
         raise
     finally:
         s.close()
+        path.unlink(missing_ok=True)
     return RedirectResponse("/", status_code=303)
 
 @app.get("/organizations/new", response_class=HTMLResponse)
@@ -531,13 +583,17 @@ def edit_organization(request: Request, org_id: int, name: str = Form(...), full
     return RedirectResponse(f"/organizations/{org.id}", status_code=303)
 
 @app.get("/organizations/{org_id}", response_class=HTMLResponse)
-def organization(request: Request, org_id: int, faculty_id: int | None = None):
+def organization(request: Request, org_id: int, faculty_id: int | None = None, file_error: str = ""):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
     context_faculty = s.get(Faculty, faculty_id) if faculty_id is not None else None
     contracts = organization_contracts(org, context_faculty.id if context_faculty else None)
+    for contract in contracts:
+        load_attachment_relations(contract)
+        for agreement in contract.agreements:
+            load_attachment_relations(agreement)
     years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
-    response = views.TemplateResponse(request, "organization.html", {"org": org, "contracts": contracts, "context_faculty": context_faculty, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all()})
+    response = views.TemplateResponse(request, "organization.html", {"org": org, "contracts": contracts, "context_faculty": context_faculty, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all(), "file_error": file_error})
     s.close()
     return response
 
@@ -607,11 +663,14 @@ def set_agreement_status(request: Request, agreement_id: int, status: str = Form
     return result
 
 @app.get("/additional-agreements/{agreement_id}/comparison", response_class=HTMLResponse)
-def agreement_comparison(request: Request, agreement_id: int):
+def agreement_comparison(request: Request, agreement_id: int, file_error: str = ""):
     s = db(); agreement = s.get(AdditionalAgreement, agreement_id)
     if not agreement: raise HTTPException(404)
     rows, years = compare_agreement_order(s, agreement)
-    return views.TemplateResponse(request, "agreement_comparison.html", {"agreement": agreement, "rows": rows, "years": years})
+    load_attachment_relations(agreement)
+    response = views.TemplateResponse(request, "agreement_comparison.html", {"agreement": agreement, "rows": rows, "years": years, "file_error": file_error})
+    s.close()
+    return response
 
 @app.post("/contracts/{contract_id}/items")
 async def add_item(contract_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
@@ -650,60 +709,121 @@ def remove_item(request: Request, item_id: int):
         return RedirectResponse(f"/applications/{destination['application_id']}", status_code=303)
     return RedirectResponse(f"/organizations/{destination['organization_id']}", status_code=303)
 
-@app.post("/contracts/{contract_id}/scan")
-async def add_scan(request: Request, contract_id: int, file: UploadFile = File(...)):
+@app.post("/contracts/{contract_id}/files")
+async def add_contract_file(request: Request, contract_id: int, file_kind: str = Form(...), file: UploadFile = File(...)):
     s = db(); c = s.get(Contract, contract_id)
     if not c: raise HTTPException(404)
-    safe = Path(file.filename).name; stored = f"{uuid.uuid4()}-{safe}"
-    target = Path("uploads") / stored
-    with open(target, "wb") as out: shutil.copyfileobj(file.file, out)
+    destination = f"/organizations/{c.organization_id}"
     try:
-        attach_scan(s, c, safe, stored, audit_actor=audit_actor(request))
-    except Exception:
-        target.unlink(missing_ok=True)
+        if file_kind not in MANUAL_FILE_KINDS:
+            raise AttachmentError("Этот тип файла нельзя загружать вручную.")
+        create_attachment(
+            s, contract=c, filename=file.filename or "", mime_type=file.content_type or "",
+            content=await read_uploaded_file(file), file_kind=file_kind, uploaded_by=request.state.user.id,
+            audit_actor=audit_actor(request),
+        )
+    except AttachmentError as error:
         s.close()
-        raise
-    organization_id = c.organization_id
+        return attachment_error_redirect(destination, error)
     s.close()
-    return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
+    return RedirectResponse(destination, status_code=303)
 
 
-@app.post("/documents/{document_id}/delete")
-def remove_document(request: Request, document_id: int):
+@app.post("/additional-agreements/{agreement_id}/files")
+async def add_agreement_file(request: Request, agreement_id: int, file_kind: str = Form(...), file: UploadFile = File(...)):
+    s = db(); agreement = s.get(AdditionalAgreement, agreement_id)
+    if not agreement: raise HTTPException(404)
+    destination = f"/additional-agreements/{agreement_id}/comparison"
+    try:
+        if file_kind not in MANUAL_FILE_KINDS:
+            raise AttachmentError("Этот тип файла нельзя загружать вручную.")
+        create_attachment(
+            s, agreement=agreement, filename=file.filename or "", mime_type=file.content_type or "",
+            content=await read_uploaded_file(file), file_kind=file_kind, uploaded_by=request.state.user.id,
+            audit_actor=audit_actor(request),
+        )
+    except AttachmentError as error:
+        s.close()
+        return attachment_error_redirect(destination, error)
+    s.close()
+    return RedirectResponse(destination, status_code=303)
+
+
+@app.get("/attachments/{attachment_id}/download")
+def download_attachment(attachment_id: int):
     session = db()
-    document = session.get(Document, document_id)
-    if not document or document.type != "SIGNED_SCAN":
+    attachment = get_attachment_metadata(session, attachment_id)
+    if not attachment:
         session.close()
         raise HTTPException(404)
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(attachment.original_name)}",
+        "Content-Length": str(attachment.size_bytes),
+        "X-Content-Type-Options": "nosniff",
+    }
+    mime_type = attachment.mime_type
+    session.close()
+    return StreamingResponse(stream_attachment(attachment_id), media_type=mime_type, headers=headers)
 
-    application_id = document.application_id
-    organization_id = document.organization_id
-    stored_path = Path("uploads") / Path(document.stored_name).name
-    quarantine_path = stored_path.with_name(f".{stored_path.name}.deleting-{uuid.uuid4()}")
-    moved = False
-    if stored_path.is_file():
-        stored_path.replace(quarantine_path)
-        moved = True
+
+@app.post("/attachments/{attachment_id}/delete")
+def remove_attachment(request: Request, attachment_id: int):
+    session = db(); attachment = get_attachment_metadata(session, attachment_id, include_deleted=True)
+    if not attachment:
+        session.close()
+        raise HTTPException(404)
+    destination = attachment_destination(attachment)
     try:
-        delete_document(session, document, audit_actor=audit_actor(request))
-    except Exception:
-        if moved and quarantine_path.is_file():
-            quarantine_path.replace(stored_path)
+        delete_attachment(
+            session, attachment, request.state.user.id, request.state.user.role,
+            audit_actor=audit_actor(request),
+        )
+    except AttachmentError as error:
         session.close()
-        raise
-    else:
-        if moved:
-            quarantine_path.unlink(missing_ok=True)
-        session.close()
+        return attachment_error_redirect(destination, error)
+    session.close()
+    return RedirectResponse(destination, status_code=303)
 
-    destination = f"/applications/{application_id}" if application_id else f"/organizations/{organization_id}"
+
+@app.post("/attachments/{attachment_id}/restore")
+def restore_deleted_attachment(request: Request, attachment_id: int):
+    session = db(); attachment = get_attachment_metadata(session, attachment_id, include_deleted=True)
+    if not attachment:
+        session.close()
+        raise HTTPException(404)
+    destination = attachment_destination(attachment)
+    try:
+        restore_attachment(
+            session, attachment, request.state.user.id, request.state.user.role,
+            audit_actor=audit_actor(request),
+        )
+    except AttachmentError as error:
+        session.close()
+        return attachment_error_redirect(destination, error)
+    session.close()
     return RedirectResponse(destination, status_code=303)
 
 @app.get("/contracts/{contract_id}/agreement")
-def agreement(contract_id: int):
+def agreement(request: Request, contract_id: int):
     s = db(); c = s.get(Contract, contract_id)
     if not c: raise HTTPException(404)
-    target = Path("uploads") / f"Дополнительное_соглашение_{contract_id}.docx"
-    render_agreement(c, target, get_bntu_requisites(s))
+    filename = f"Дополнительное_соглашение_{contract_id}.docx"
+    content = render_agreement_bytes(c, get_bntu_requisites(s))
+    target = c.active_agreement
+    create_attachment(
+        s,
+        agreement=target if target else None,
+        contract=None if target else c,
+        filename=filename,
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        content=content,
+        file_kind="generated_docx",
+        uploaded_by=request.state.user.id,
+        audit_actor=audit_actor(request),
+    )
     s.close()
-    return FileResponse(target, filename=target.name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )

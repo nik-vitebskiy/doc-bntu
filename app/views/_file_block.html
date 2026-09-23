@@ -1,0 +1,20 @@
+<section class="card file-block" data-file-block>
+  <div class="file-block-heading"><div><h2>Файлы</h2><p class="muted">PDF, JPG, PNG или DOCX, не более 50 МБ</p></div></div>
+  {% if file_error %}<p class="file-error" role="alert">{{ file_error }}</p>{% endif %}
+  <div class="file-list">
+    {% for attachment in attachments if not attachment.deleted_at %}
+      <article class="file-row">
+        <span class="file-icon" aria-hidden="true">{{ '▧' if attachment.file_kind == 'generated_docx' else ('▣' if attachment.file_kind == 'signed_scan' else '◫') }}</span>
+        <div class="file-info"><a href="/attachments/{{ attachment.id }}/download">{{ attachment.original_name }}</a><small>{{ file_kind_labels.get(attachment.file_kind, attachment.file_kind) }} · {{ attachment.size_bytes|filesize }} · {{ attachment.uploader.full_name or attachment.uploader.username if attachment.uploader else 'Система' }} · {{ attachment.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</small></div>
+        {% if attachment.file_kind != 'generated_docx' and (request.state.user.role == 'ADMIN' or attachment.uploaded_by == request.state.user.id) %}<form method="post" action="/attachments/{{ attachment.id }}/delete" onsubmit="return confirm('Удалить файл? Его можно будет восстановить.')"><button class="file-action" title="Удалить файл">Удалить</button></form>{% endif %}
+      </article>
+    {% else %}<p class="file-empty">Файлы не прикреплены</p>{% endfor %}
+  </div>
+  <form class="file-upload" method="post" action="{{ upload_url }}" enctype="multipart/form-data">
+    <label>Назначение файла<select name="file_kind" required><option value="signed_scan">Подписанный скан</option><option value="source_file">Исходник от организации</option></select></label>
+    <label class="file-dropzone" data-file-dropzone><input type="file" name="file" accept=".pdf,.jpg,.jpeg,.png,.docx" required><span><b>Выберите файл</b> или перетащите его сюда</span><small data-file-name>Файл не выбран</small></label>
+    <button class="button" type="submit">Загрузить</button>
+  </form>
+  {% set deleted = attachments|selectattr('deleted_at')|list %}
+  {% if deleted %}<details class="deleted-files"><summary>Удалённые файлы ({{ deleted|length }})</summary>{% for attachment in deleted %}<div class="file-row deleted"><div class="file-info"><span>{{ attachment.original_name }}</span><small>Удалён {{ attachment.deleted_at.strftime('%d.%m.%Y %H:%M') }}</small></div>{% if request.state.user.role == 'ADMIN' or attachment.uploaded_by == request.state.user.id %}<form method="post" action="/attachments/{{ attachment.id }}/restore"><button class="file-action">Восстановить</button></form>{% endif %}</div>{% endfor %}</details>{% endif %}
+</section>
