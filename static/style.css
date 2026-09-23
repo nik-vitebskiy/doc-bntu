@@ -219,6 +219,7 @@ p{
 
 .filters{
   display:flex;
+  flex-wrap:wrap;
   gap:9px;
   padding:12px;
   border-bottom:1px solid #e8edf4
@@ -235,6 +236,61 @@ p{
 .filters button{
   background:#f0f5fb;
   color:#46607e
+}
+
+.urgency-filters{
+  display:flex;
+  flex:1 0 100%;
+  gap:8px;
+  align-items:center
+}
+
+.filters .urgency-toggle{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-height:34px;
+  padding:7px 11px;
+  border:1px solid transparent;
+  border-radius:999px;
+  background:#f3f5f8;
+  color:#52627b
+}
+
+.urgency-toggle span{
+  min-width:22px;
+  padding:2px 6px;
+  border-radius:999px;
+  background:rgba(255,255,255,.72);
+  text-align:center;
+  font-size:11px;
+  font-weight:700
+}
+
+.urgency-toggle.urgency-due_30.active{
+  border-color:#d98787;
+  background:#f8dddd;
+  color:#8f2929
+}
+
+.urgency-toggle.urgency-due_90.active{
+  border-color:#d9b85f;
+  background:#fff0bf;
+  color:#795a09
+}
+
+.urgency-toggle.urgency-later.active{
+  border-color:#71bc91;
+  background:#dff4e8;
+  color:#14733d
+}
+
+.overdue-label{
+  display:block;
+  margin-top:4px;
+  color:#a32f2f;
+  font-size:10px;
+  font-weight:700
 }
 
 .legend{

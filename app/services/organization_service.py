@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, ContractFaculty, Document, Faculty, Order, OrderItem, Organization, Specialty
 from .audit_service import AuditAction, audited, current_audit_batch
+from .status_service import ExpiryUrgency, URGENCY_BUCKETS, expiry_urgency
 
 
 FACULTY_NAME_ALIASES = {
@@ -19,6 +20,7 @@ class RegistryRow:
     faculty: Faculty
     specialty_codes: list[str]
     faculty_count: int
+    expiry: ExpiryUrgency | None
 
 
 def canonical_faculty_name(name: str) -> str:
@@ -67,7 +69,7 @@ def get_or_create_specialty(session, code, qualification="", faculty=""):
     return specialty
 
 
-def registry(session, query_text="", faculty="", end_year=""):
+def registry(session, query_text="", faculty="", end_year="", urgency=""):
     all_faculties = session.query(Faculty).order_by(Faculty.name).all()
     faculties = [row.name for row in all_faculties]
     faculty_by_id = {row.id: row for row in all_faculties}
@@ -100,11 +102,27 @@ def registry(session, query_text="", faculty="", end_year=""):
             if needle and not (needle in contract.organization.name.casefold() or needle in contract.number.casefold()
                                or any(needle in code.casefold() for code in codes)):
                 continue
-            rows.append(RegistryRow(contract, faculty_ref, list(dict.fromkeys(codes)), len(by_faculty)))
-    if faculty:
+            rows.append(RegistryRow(
+                contract,
+                faculty_ref,
+                list(dict.fromkeys(codes)),
+                len(by_faculty),
+                expiry_urgency(contract.end_date),
+            ))
+    urgency_counts = {key: 0 for key, _label in URGENCY_BUCKETS}
+    for row in rows:
+        if row.expiry:
+            urgency_counts[row.expiry.bucket] += 1
+    valid_buckets = set(urgency_counts)
+    selected_urgency = urgency if urgency in valid_buckets else ""
+    if selected_urgency:
+        rows = [row for row in rows if row.expiry and row.expiry.bucket == selected_urgency]
+    if selected_urgency == "due_30":
+        rows.sort(key=lambda row: (not row.expiry.overdue, row.faculty_count > 1 if faculty else False))
+    elif faculty:
         rows.sort(key=lambda row: row.faculty_count > 1)
     end_years = [row[0] for row in session.query(extract("year", Contract.end_date)).filter(Contract.end_date.is_not(None)).distinct().order_by(extract("year", Contract.end_date))]
-    return rows, faculties, counts, end_years, len(contracts)
+    return rows, faculties, counts, end_years, len(contracts), urgency_counts
 
 
 def organization_contracts(organization, faculty_id=None):

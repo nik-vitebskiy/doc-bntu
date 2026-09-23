@@ -78,17 +78,17 @@ def test_registry_splits_shared_contract_by_faculty(session, user, tmp_path):
     path.write_bytes(sample_workbook())
     import_xlsx(session, path, user.id)
 
-    rows, _, counts, _, total = registry(session)
+    rows, _, counts, _, total, _ = registry(session)
     assert (len(rows), total) == (11, 1)
     assert all(counts[f"Факультет {index}"] == 1 for index in range(1, 12))
     assert all(row.faculty_count == 11 for row in rows)
     assert sum(len(row.specialty_codes) for row in rows) == 60
 
-    filtered, _, _, _, total = registry(session, faculty="Факультет 1")
+    filtered, _, _, _, total, _ = registry(session, faculty="Факультет 1")
     assert len(filtered) == 1 and total == 1
     assert filtered[0].faculty.name == "Факультет 1"
     assert filtered[0].specialty_codes == [f"TEST-{number:02d}" for number in (1, 12, 23, 34, 45, 56)]
-    by_code, _, _, _, _ = registry(session, query_text="TEST-12")
+    by_code, _, _, _, _, _ = registry(session, query_text="TEST-12")
     assert [(row.faculty.name, row.contract.id) for row in by_code] == [("Факультет 1", filtered[0].contract.id)]
 
 
@@ -103,7 +103,7 @@ def test_same_specialty_in_two_faculties_is_not_collapsed(session, user, tmp_pat
     workbook.save(path)
     result = import_xlsx(session, path, user.id)
     assert (result.contracts, result.order_items_created) == (1, 2)
-    rows, _, _, _, count = registry(session)
+    rows, _, _, _, count, _ = registry(session)
     assert count == 1
     assert {(row.faculty.name, tuple(row.specialty_codes)) for row in rows} == {
         ("Факультет А", ("CODE-01",)), ("Факультет Б", ("CODE-01",)),
