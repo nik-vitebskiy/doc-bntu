@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from sqlalchemy import extract, func, or_
 from sqlalchemy.orm import selectinload
 
-from ..models import AdditionalAgreement, AnnualDemand, AppUser, Contract, ContractFaculty, Document, Faculty, Order, OrderItem, Organization, Specialty
+from ..models import AdditionalAgreement, AnnualDemand, Contract, ContractFaculty, Document, Faculty, Order, OrderItem, Organization, Specialty
 from .audit_service import AuditAction, audited, current_audit_batch
 from .status_service import ExpiryUrgency, URGENCY_BUCKETS, expiry_urgency
 
@@ -38,20 +38,10 @@ def get_or_create_faculty(session, name):
     return faculty
 
 
-def demo_user(session):
-    user = session.query(AppUser).filter_by(username="demo").first()
-    if not user:
-        user = AppUser(username="demo", password_hash="not-used-in-demo")
-        session.add(user)
-        session.flush()
-    return user
-
-
 def get_or_create_order(session, contract, user_id=None):
     order = session.query(Order).filter_by(contract_id=contract.id).order_by(Order.id).first()
     if not order:
-        creator_id = user_id or demo_user(session).id
-        order = Order(organization_id=contract.organization_id, contract_id=contract.id, created_by=creator_id)
+        order = Order(organization_id=contract.organization_id, contract_id=contract.id, created_by=user_id)
         session.add(order)
         session.flush()
     return order

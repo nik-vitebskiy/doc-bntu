@@ -183,11 +183,11 @@ class Order(Base):
     revision: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(30), default="DRAFT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    created_by: Mapped[int] = mapped_column(ForeignKey("app_user.id"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
     contract: Mapped[Contract | None] = relationship(back_populates="orders")
     additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="orders")
     application: Mapped[Application | None] = relationship(back_populates="orders")
-    creator: Mapped[AppUser] = relationship(foreign_keys=[created_by])
+    creator: Mapped[AppUser | None] = relationship(foreign_keys=[created_by])
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
 
 

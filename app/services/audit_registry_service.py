@@ -39,10 +39,6 @@ ACTION_LABELS = {
     "FILE_RESTORE": "Восстановлен файл",
     "COPY": "Копирование заказа",
     "LOGIN": "Вход в систему",
-    # Historical rows created before the unified action enum remain immutable,
-    # but still need clear Russian labels in the registry.
-    "ACTIVATE": "Активация доп. соглашения",
-    "SEED_TEST_DATA": "Созданы тестовые данные",
 }
 
 ENTITY_FILTERS = {
@@ -437,5 +433,9 @@ def get_audit_registry(
             file_url=file_url,
             file_name=file_name,
         ))
-    users = session.scalars(select(AppUser).order_by(func.coalesce(AppUser.full_name, AppUser.username))).all()
+    users = session.scalars(
+        select(AppUser)
+        .where(AppUser.username != "demo")
+        .order_by(func.coalesce(AppUser.full_name, AppUser.username))
+    ).all()
     return AuditRegistry(rows=rows, users=list(users), total=total, page=page, pages=pages)
