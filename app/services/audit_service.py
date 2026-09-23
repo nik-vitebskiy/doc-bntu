@@ -138,7 +138,7 @@ def entity_label(entity: Any) -> str:
         if isinstance(entity, AppUser):
             return f"Пользователь {entity.full_name or entity.username}"
         if isinstance(entity, AppSetting):
-            return f"Настройка {entity.key}"
+            return f"Настройка: {entity.description or entity.key}"
         if isinstance(entity, Document):
             return f"Файл {entity.filename or entity.id}"
     except Exception:
@@ -360,6 +360,8 @@ class AuditBatch:
         original = self._original.get(id(entity), {})
         for attribute in state.mapper.column_attrs:
             key = attribute.key
+            if isinstance(entity, AppSetting) and key in {"updated_at", "updated_by"}:
+                continue
             history = state.attrs[key].history
             if not history.has_changes():
                 continue
