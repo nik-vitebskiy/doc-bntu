@@ -20,6 +20,7 @@ from ..models import (
     Contract,
     ContractFaculty,
     Document,
+    DocumentAttachment,
     Faculty,
     Order,
     OrderItem,
@@ -35,6 +36,7 @@ class AuditAction(StrEnum):
     STATUS_CHANGE = "STATUS_CHANGE"
     FILE_UPLOAD = "FILE_UPLOAD"
     FILE_DELETE = "FILE_DELETE"
+    FILE_RESTORE = "FILE_RESTORE"
     COPY = "COPY"
     LOGIN = "LOGIN"
 
@@ -59,7 +61,7 @@ class PendingAuditEvent:
     audit_row: AuditLog | None = field(default=None, init=False)
 
 
-SENSITIVE_FIELDS = {"password_hash"}
+SENSITIVE_FIELDS = {"password_hash", "content"}
 SENSITIVE_KEY_PARTS = ("password", "token", "secret", "api_key", "access_key", "private_key")
 AUDIT_BATCH_KEY = "audit_batch"
 
@@ -86,6 +88,8 @@ def serialize_entity(entity: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for attribute in state.mapper.column_attrs:
         key = attribute.key
+        if key == "content":
+            continue
         if key in SENSITIVE_FIELDS:
             if getattr(entity, key, None):
                 result["password"] = "задан"
@@ -139,8 +143,10 @@ def entity_label(entity: Any) -> str:
             return f"Пользователь {entity.full_name or entity.username}"
         if isinstance(entity, AppSetting):
             return f"Настройка: {entity.description or entity.key}"
+        if isinstance(entity, DocumentAttachment):
+            return f"Файл {entity.original_name}"
         if isinstance(entity, Document):
-            return f"Файл {entity.filename or entity.id}"
+            return f"Карточка документа {entity.id}"
     except Exception:
         # A deleted object's lazy relationship may no longer be available. The
         # fallback still leaves an immutable and identifiable audit record.
@@ -292,7 +298,7 @@ class AuditBatch:
         deleted_entities = [entity for entity in self.session.deleted if self._should_collect(entity)]
 
         for entity in sorted(new_entities, key=self._sort_key):
-            action = AuditAction.FILE_UPLOAD if isinstance(entity, Document) else AuditAction.CREATE
+            action = AuditAction.FILE_UPLOAD if isinstance(entity, DocumentAttachment) else AuditAction.CREATE
             self.events.append(
                 PendingAuditEvent(action=action, entity=entity, entity_type=_entity_type(entity), comment=self.comment)
             )
@@ -328,7 +334,7 @@ class AuditBatch:
             self.suppress(entity)
 
         for entity in sorted(deleted_entities, key=self._sort_key):
-            action = AuditAction.FILE_DELETE if isinstance(entity, Document) else AuditAction.DELETE
+            action = AuditAction.FILE_DELETE if isinstance(entity, DocumentAttachment) else AuditAction.DELETE
             self.events.append(
                 PendingAuditEvent(
                     action=action,

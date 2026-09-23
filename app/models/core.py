@@ -1,7 +1,6 @@
 import json
 from datetime import date, datetime
-from pathlib import Path
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, event, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text, event, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
@@ -75,7 +74,13 @@ class Contract(Base):
     @property
     def faculty_names(self): return [link.faculty.name for link in self.faculty_links]
     @property
-    def uploads(self): return [doc for doc in self.documents if doc.type == "SIGNED_SCAN"]
+    def attachments(self): return [attachment for document in self.documents for attachment in document.attachments]
+    @property
+    def active_attachments(self): return [attachment for attachment in self.attachments if attachment.deleted_at is None]
+    @property
+    def has_signed_scan(self):
+        own_scan = any(attachment.file_kind == "signed_scan" for attachment in self.active_attachments)
+        return own_scan or bool(self.active_agreement and self.active_agreement.has_signed_scan)
     @property
     def active_agreement(self):
         return next((agreement for agreement in self.agreements if agreement.status == "Активен"), None)
@@ -112,6 +117,13 @@ class AdditionalAgreement(Base):
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     contract: Mapped[Contract] = relationship(back_populates="agreements")
     orders: Mapped[list["Order"]] = relationship(back_populates="additional_agreement")
+    documents: Mapped[list["Document"]] = relationship(back_populates="additional_agreement")
+    @property
+    def attachments(self): return [attachment for document in self.documents for attachment in document.attachments]
+    @property
+    def active_attachments(self): return [attachment for attachment in self.attachments if attachment.deleted_at is None]
+    @property
+    def has_signed_scan(self): return any(attachment.file_kind == "signed_scan" for attachment in self.active_attachments)
 
 
 class Application(Base):
@@ -135,7 +147,11 @@ class Application(Base):
     @property
     def items(self): return self.current_order.items if self.current_order else []
     @property
-    def uploads(self): return [document for document in self.documents if document.type == "SIGNED_SCAN"]
+    def attachments(self): return [attachment for document in self.documents for attachment in document.attachments]
+    @property
+    def active_attachments(self): return [attachment for attachment in self.attachments if attachment.deleted_at is None]
+    @property
+    def has_signed_scan(self): return any(attachment.file_kind == "signed_scan" for attachment in self.active_attachments)
 
 
 class ApplicationFaculty(Base):
@@ -213,22 +229,33 @@ class Document(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contract.id", ondelete="SET NULL"), nullable=True)
     application_id: Mapped[int | None] = mapped_column(ForeignKey("application.id", ondelete="SET NULL"), nullable=True)
+    additional_agreement_id: Mapped[int | None] = mapped_column(ForeignKey("additional_agreement.id", ondelete="SET NULL"), nullable=True)
     type: Mapped[str] = mapped_column(String(50))
     version: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(30), default="DRAFT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    original_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
     contract: Mapped[Contract | None] = relationship(back_populates="documents")
     application: Mapped[Application | None] = relationship(back_populates="documents")
-    @property
-    def stored_name(self): return self.file_id or ""
-    @property
-    def filename(self):
-        if self.original_filename:
-            return self.original_filename
-        value = self.file_id or ""
-        return value.split("-", 1)[1] if "-" in value else Path(value).name
+    additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="documents")
+    attachments: Mapped[list["DocumentAttachment"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+
+
+class DocumentAttachment(Base):
+    __tablename__ = "document_attachment"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("document.id", ondelete="CASCADE"), index=True)
+    file_kind: Mapped[str] = mapped_column(String(30), index=True)
+    original_name: Mapped[str] = mapped_column(String(500))
+    mime_type: Mapped[str] = mapped_column(String(255))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    # Card/list queries never need the blob. Loading is explicit for tests and
+    # chunked with SQL substring() for downloads.
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True, index=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    document: Mapped[Document] = relationship(back_populates="attachments")
+    uploader: Mapped[AppUser | None] = relationship()
 
 
 class AuditLog(Base):

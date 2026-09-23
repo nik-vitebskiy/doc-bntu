@@ -9,7 +9,7 @@ from app.models import (
     AdditionalAgreement,
     AuditLog,
     Contract,
-    Document,
+    DocumentAttachment,
     Order,
 )
 from app.services.audit_registry_service import get_audit_registry
@@ -157,31 +157,42 @@ def test_order_item_and_demand_create_update_delete_are_audited(session, contrac
     assert any(row.entity_type == "annual_demand" and row.action == "DELETE" for row in deleted)
 
 
-def test_scan_upload_and_delete_are_audited_and_remove_file(session, contract, client):
+def test_scan_upload_download_soft_delete_and_restore_are_audited(session, contract, client):
     response = client.post(
-        f"/contracts/{contract.id}/scan",
+        f"/contracts/{contract.id}/files",
+        data={"file_kind": "signed_scan"},
         files={"file": ("scan.pdf", b"test-pdf", "application/pdf")},
     )
     assert response.status_code == 303
     session.expire_all()
-    document = session.scalars(select(Document).where(Document.contract_id == contract.id)).one()
-    document_id = document.id
-    upload = session.scalars(select(AuditLog).where(AuditLog.entity_id == document.id, AuditLog.action == "FILE_UPLOAD")).one()
-    assert upload.diff["new"]["original_filename"] == "scan.pdf"
+    attachment = session.scalars(select(DocumentAttachment)).one()
+    attachment_id = attachment.id
+    assert attachment.content == b"test-pdf"
+    upload = session.scalars(select(AuditLog).where(AuditLog.entity_id == attachment.id, AuditLog.action == "FILE_UPLOAD")).one()
+    assert upload.diff["new"]["original_name"] == "scan.pdf"
+    assert "content" not in upload.diff["new"]
 
-    from pathlib import Path
-    stored_path = Path("uploads") / document.stored_name
-    assert stored_path.is_file()
-    response = client.post(f"/documents/{document_id}/delete")
+    response = client.get(f"/attachments/{attachment_id}/download")
+    assert response.status_code == 200
+    assert response.content == b"test-pdf"
+
+    response = client.post(f"/attachments/{attachment_id}/delete")
     assert response.status_code == 303
     session.expire_all()
-    assert session.get(Document, document_id) is None
-    assert not stored_path.exists()
-    deleted = session.scalars(select(AuditLog).where(AuditLog.entity_id == document_id, AuditLog.action == "FILE_DELETE")).one()
-    assert deleted.diff["old"]["original_filename"] == "scan.pdf"
+    assert session.get(DocumentAttachment, attachment_id).deleted_at is not None
+    assert client.get(f"/attachments/{attachment_id}/download").status_code == 404
+    deleted = session.scalars(select(AuditLog).where(AuditLog.entity_id == attachment_id, AuditLog.action == "FILE_DELETE")).one()
+    assert deleted.diff["old"]["original_name"] == "scan.pdf"
     registry = get_audit_registry(session, action="FILE_DELETE")
     assert registry.rows[0].file_name == "scan.pdf"
     assert registry.rows[0].file_url is None
+
+    response = client.post(f"/attachments/{attachment_id}/restore")
+    assert response.status_code == 303
+    session.expire_all()
+    assert session.get(DocumentAttachment, attachment_id).deleted_at is None
+    restored = session.scalars(select(AuditLog).where(AuditLog.entity_id == attachment_id, AuditLog.action == "FILE_RESTORE")).one()
+    assert restored.diff["new"]["original_name"] == "scan.pdf"
 
 
 def test_excel_import_records_current_user_and_system(session, client, tmp_path):

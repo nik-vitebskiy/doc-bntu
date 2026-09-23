@@ -79,7 +79,8 @@ def registry(session, query_text="", faculty="", end_year="", urgency=""):
         selectinload(Contract.organization),
         selectinload(Contract.faculty_links).selectinload(ContractFaculty.faculty),
         selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.specialty_ref),
-        selectinload(Contract.agreements),
+        selectinload(Contract.agreements).selectinload(AdditionalAgreement.documents).selectinload(Document.attachments),
+        selectinload(Contract.documents).selectinload(Document.attachments),
     ).order_by(Contract.id).all())
     needle = query_text.casefold().strip()
     for contract in contracts:
@@ -245,15 +246,6 @@ def delete_item(session, item: OrderItem):
         session.delete(demand)
     session.delete(item)
     return destination
-
-
-@audited
-def attach_scan(session, contract, filename, stored_name):
-    document = Document(organization_id=contract.organization_id, contract_id=contract.id,
-                        type="SIGNED_SCAN", status="SIGNED", file_id=stored_name,
-                        original_filename=filename)
-    session.add(document)
-    return document
 
 
 @audited

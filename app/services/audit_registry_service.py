@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,6 +18,7 @@ from ..models import (
     Contract,
     ContractRedirect,
     Document,
+    DocumentAttachment,
     Order,
     OrderItem,
     OrderRedirect,
@@ -36,6 +36,7 @@ ACTION_LABELS = {
     "STATUS_CHANGE": "Смена статуса",
     "FILE_UPLOAD": "Загружен файл",
     "FILE_DELETE": "Удалён файл",
+    "FILE_RESTORE": "Восстановлен файл",
     "COPY": "Копирование заказа",
     "LOGIN": "Вход в систему",
     # Historical rows created before the unified action enum remain immutable,
@@ -50,7 +51,7 @@ ENTITY_FILTERS = {
     "additional_agreement": ("Доп. соглашение", {"additional_agreement"}),
     "application": ("Заявка", {"application"}),
     "order": ("Заказ", {"order", "order_item", "annual_demand", "specialty"}),
-    "document": ("Файл", {"document", "excel_import"}),
+    "document": ("Файл", {"document", "document_attachment", "excel_import"}),
     "faculty": ("Факультет", {"faculty", "contract_faculty", "application_faculty"}),
     "app_user": ("Пользователь", {"app_user"}),
     "app_setting": ("Настройки", {"app_setting"}),
@@ -100,6 +101,13 @@ FIELD_LABELS = {
     "original_filename": "Имя файла",
     "filename": "Имя файла",
     "stored_name": "Сохранённый файл",
+    "file_kind": "Назначение файла",
+    "original_name": "Имя файла",
+    "mime_type": "Формат файла",
+    "size_bytes": "Размер, байт",
+    "uploaded_by": "Загрузил",
+    "uploaded_at": "Дата загрузки",
+    "deleted_at": "Дата удаления",
     "rows_processed": "Обработано строк",
     "username": "Логин",
     "password": "Пароль",
@@ -308,6 +316,22 @@ def _bulk_entity_urls(session: Session, records: list[AuditLog]) -> dict[tuple[s
             url = _order_url(order, f"order-item-{item_id}")
             if url:
                 urls[("annual_demand", demand_id)] = url
+
+    attachment_ids = by_type.get("document_attachment", set())
+    if attachment_ids:
+        query = (
+            select(DocumentAttachment.id, Document)
+            .join(Document, Document.id == DocumentAttachment.document_id)
+            .where(DocumentAttachment.id.in_(attachment_ids))
+        )
+        for attachment_id, document in session.execute(query):
+            if document.application_id:
+                url = f"/applications/{document.application_id}"
+            elif document.additional_agreement_id:
+                url = f"/additional-agreements/{document.additional_agreement_id}/comparison"
+            else:
+                url = f"/organizations/{document.organization_id}"
+            urls[("document_attachment", attachment_id)] = url
     return urls
 
 
@@ -320,20 +344,17 @@ def _order_url(order: Order, anchor: str | None = None) -> str | None:
     return None
 
 
-def _file_details(record: AuditLog, documents: dict[int, Document]) -> tuple[str | None, str | None]:
+def _file_details(record: AuditLog, attachments: dict[int, DocumentAttachment]) -> tuple[str | None, str | None]:
     diff = record.diff or {}
     values = (diff.get("old") if record.action == "FILE_DELETE" else diff.get("new")) or {}
-    filename = values.get("original_filename") or values.get("filename")
-    stored_name = values.get("file_id") or values.get("stored_name")
-    if record.entity_type == "document" and record.entity_id:
-        document = documents.get(record.entity_id)
-        if document:
-            filename = document.filename
-            stored_name = document.stored_name
+    filename = values.get("original_name") or values.get("original_filename") or values.get("filename")
+    attachment = attachments.get(record.entity_id) if record.entity_type == "document_attachment" and record.entity_id else None
+    if attachment:
+        filename = attachment.original_name
     if not filename:
         return None, None
-    if stored_name and Path("uploads", Path(stored_name).name).is_file():
-        return filename, f"/uploads/{Path(stored_name).name}"
+    if attachment and attachment.deleted_at is None:
+        return filename, f"/attachments/{attachment.id}/download"
     return filename, None
 
 
@@ -384,19 +405,19 @@ def get_audit_registry(
     ).all()
     records = [entry[0] for entry in result]
     urls = _bulk_entity_urls(session, records)
-    document_ids = {
+    attachment_ids = {
         record.entity_id for record in records
-        if record.entity_type == "document" and record.entity_id is not None
+        if record.entity_type == "document_attachment" and record.entity_id is not None
     }
-    documents = {
-        document.id: document for document in session.scalars(
-            select(Document).where(Document.id.in_(document_ids))
+    attachments = {
+        attachment.id: attachment for attachment in session.scalars(
+            select(DocumentAttachment).where(DocumentAttachment.id.in_(attachment_ids))
         )
-    } if document_ids else {}
+    } if attachment_ids else {}
     rows: list[AuditRow] = []
     for record, full_name, username in result:
         copy_summary, copied_items = _copied_items(record.diff) if record.action == "COPY" else (None, [])
-        file_name, file_url = _file_details(record, documents) if record.action in {"FILE_UPLOAD", "FILE_DELETE"} else (None, None)
+        file_name, file_url = _file_details(record, attachments) if record.action in {"FILE_UPLOAD", "FILE_DELETE", "FILE_RESTORE"} else (None, None)
         rows.append(AuditRow(
             id=record.id,
             timestamp=record.timestamp.astimezone(DISPLAY_TIMEZONE),
