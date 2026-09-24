@@ -9,5 +9,6 @@ COPY pytest.ini ./pytest.ini
 COPY static ./static
 COPY templates ./templates
 COPY tests ./tests
+COPY docs ./docs
 RUN mkdir -p /app/data /app/uploads
 CMD ["sh", "-c", "alembic upgrade head && python -m pytest -q"]

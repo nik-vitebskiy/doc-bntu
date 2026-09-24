@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -24,113 +25,19 @@ from ..models import (
     OrderRedirect,
     Organization,
 )
+from .audit_metadata import (
+    ACTION_LABELS,
+    ENTITY_FIELD_ORDER,
+    ENTITY_FILTERS,
+    FIELD_LABELS,
+    HIDDEN_DIFF_FIELDS,
+    VALUE_LABELS,
+)
 
 
 PAGE_SIZE = 50
 DISPLAY_TIMEZONE = ZoneInfo("Europe/Minsk")
-
-ACTION_LABELS = {
-    "CREATE": "Создано",
-    "UPDATE": "Изменено",
-    "DELETE": "Удалено",
-    "STATUS_CHANGE": "Смена статуса",
-    "FILE_UPLOAD": "Загружен файл",
-    "FILE_DELETE": "Удалён файл",
-    "FILE_RESTORE": "Восстановлен файл",
-    "COPY": "Копирование заказа",
-    "LOGIN": "Вход в систему",
-}
-
-ENTITY_FILTERS = {
-    "organization": ("Организация", {"organization"}),
-    "contract": ("Договор", {"contract"}),
-    "additional_agreement": ("Доп. соглашение", {"additional_agreement"}),
-    "application": ("Заявка", {"application"}),
-    "order": ("Заказ", {"order", "order_item", "annual_demand", "specialty"}),
-    "document": ("Файл", {"document", "document_attachment", "excel_import"}),
-    "faculty": ("Факультет", {"faculty", "contract_faculty", "application_faculty"}),
-    "app_user": ("Пользователь", {"app_user"}),
-    "app_setting": ("Настройки", {"app_setting"}),
-}
-
-FIELD_LABELS = {
-    "id": "Идентификатор",
-    "organization_id": "Организация",
-    "contract_id": "Договор",
-    "application_id": "Заявка",
-    "additional_agreement_id": "Доп. соглашение",
-    "previous_agreement_id": "Предыдущее доп. соглашение",
-    "previous_order_id": "Предыдущая редакция заказа",
-    "order_id": "Заказ",
-    "order_item_id": "Строка заказа",
-    "specialty_id": "Специальность",
-    "faculty_id": "Факультет",
-    "created_by": "Создал",
-    "updated_by": "Изменил",
-    "number": "Номер",
-    "name": "Наименование",
-    "short_name": "Краткое наименование",
-    "full_name": "Полное наименование",
-    "unp": "УНП",
-    "legal_address": "Юридический адрес",
-    "authority": "Ведомство",
-    "phone": "Телефон",
-    "status": "Статус",
-    "start_date": "Дата начала",
-    "end_date": "Дата окончания",
-    "date": "Дата",
-    "received_date": "Дата получения",
-    "signed_date": "Дата подписания",
-    "activated_at": "Дата активации",
-    "created_at": "Дата создания",
-    "is_current": "Действующая редакция",
-    "revision": "Редакция",
-    "qualification": "Квалификация",
-    "qualification_value": "Квалификация",
-    "profile": "Профиль",
-    "year": "Год",
-    "quantity": "Потребность",
-    "code": "Код",
-    "type": "Тип документа",
-    "version": "Версия",
-    "file_id": "Сохранённый файл",
-    "original_filename": "Имя файла",
-    "filename": "Имя файла",
-    "stored_name": "Сохранённый файл",
-    "file_kind": "Назначение файла",
-    "original_name": "Имя файла",
-    "mime_type": "Формат файла",
-    "size_bytes": "Размер, байт",
-    "uploaded_by": "Загрузил",
-    "uploaded_at": "Дата загрузки",
-    "deleted_at": "Дата удаления",
-    "rows_processed": "Обработано строк",
-    "username": "Логин",
-    "password": "Пароль",
-    "role": "Роль",
-    "is_active": "Активен",
-    "must_change_password": "Требуется сменить пароль",
-    "last_login_at": "Последний вход",
-    "key": "Параметр",
-    "value": "Значение",
-    "description": "Описание",
-    "source_order_id": "Исходный заказ",
-    "target_order_id": "Новый заказ",
-    "rows_count": "Скопировано строк",
-}
-
-VALUE_LABELS = {
-    "ACTIVE": "Активен",
-    "CLOSED": "Закрыт",
-    "DRAFT": "Черновик",
-    "CURRENT": "Действующий",
-    "SIGNED": "Подписан",
-    "SIGNED_SCAN": "Скан подписанного документа",
-    "ADMIN": "Администратор",
-    "HEAD": "Руководитель отдела",
-    "SYSTEM": "Система",
-}
-
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AuditDiffLine:
@@ -176,6 +83,11 @@ def _display_value(value: Any) -> str:
     if isinstance(value, dict):
         return "; ".join(f"{key}: {_display_value(item)}" for key, item in value.items()) or "—"
     if isinstance(value, str):
+        # DRAFT was an obsolete internal default, never a business status.
+        # Historical audit rows are immutable, so render that legacy value as
+        # the effective state without changing the stored record.
+        if value == "DRAFT":
+            return "Действующий"
         if value in VALUE_LABELS:
             return VALUE_LABELS[value]
         try:
@@ -188,22 +100,35 @@ def _display_value(value: Any) -> str:
     return str(value)
 
 
-def _field_label(entity_type: str, key: str) -> str:
+def _field_label(entity_type: str, key: str) -> str | None:
     if entity_type == "app_user" and key == "full_name":
         return "ФИО"
-    return FIELD_LABELS.get(key, key.replace("_", " ").capitalize())
+    label = FIELD_LABELS.get(key)
+    if label is None:
+        logger.warning("Audit diff field has no display mapping: entity_type=%s field=%s", entity_type, key)
+    return label
 
 
 def _diff_lines(entity_type: str, diff: dict[str, Any] | None) -> list[AuditDiffLine]:
     diff = diff or {}
     old = diff.get("old") or {}
     new = diff.get("new") or {}
-    keys = [key for key in dict.fromkeys([*old.keys(), *new.keys()]) if key != "items"]
-    return [
-        AuditDiffLine(_field_label(entity_type, key), _display_value(old.get(key)), _display_value(new.get(key)))
-        for key in keys
-        if old.get(key) != new.get(key)
+    keys = [
+        key for key in dict.fromkeys([*old.keys(), *new.keys()])
+        if key != "items" and key not in HIDDEN_DIFF_FIELDS
     ]
+    preferred = ENTITY_FIELD_ORDER.get(entity_type, ())
+    rank = {key: index for index, key in enumerate(preferred)}
+    keys.sort(key=lambda key: (rank.get(key, len(rank)), key))
+    lines: list[AuditDiffLine] = []
+    for key in keys:
+        if old.get(key) == new.get(key):
+            continue
+        label = _field_label(entity_type, key)
+        if label is None:
+            continue
+        lines.append(AuditDiffLine(label, _display_value(old.get(key)), _display_value(new.get(key))))
+    return lines
 
 
 def _copied_items(diff: dict[str, Any] | None) -> tuple[str | None, list[str]]:

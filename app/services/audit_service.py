@@ -27,6 +27,7 @@ from ..models import (
     Organization,
     Specialty,
 )
+from .audit_metadata import REFERENCE_FIELDS
 
 
 class AuditAction(StrEnum):
@@ -83,8 +84,62 @@ def _json_value(value: Any) -> Any:
     return str(value)
 
 
+REFERENCE_MODELS = {
+    "organization": Organization,
+    "contract": Contract,
+    "additional_agreement": AdditionalAgreement,
+    "application": Application,
+    "order": Order,
+    "order_item": OrderItem,
+    "specialty": Specialty,
+    "faculty": Faculty,
+    "app_user": AppUser,
+    "document": Document,
+}
+
+
+def _reference_label(session: Session | None, target: str, identifier: Any) -> Any:
+    if identifier is None or not isinstance(identifier, int) or session is None:
+        return identifier
+    referenced = session.get(REFERENCE_MODELS[target], identifier)
+    if referenced is None:
+        return f"Удалённая запись №{identifier}"
+    if isinstance(referenced, Organization):
+        return referenced.short_name
+    if isinstance(referenced, Contract):
+        return f"№{referenced.number}"
+    if isinstance(referenced, AdditionalAgreement):
+        return f"№{referenced.number}"
+    if isinstance(referenced, Application):
+        return f"№{referenced.number}" if referenced.number else "Без номера"
+    if isinstance(referenced, Specialty):
+        return referenced.code if referenced.name == referenced.code else f"{referenced.code} — {referenced.name}"
+    if isinstance(referenced, Faculty):
+        return referenced.name
+    if isinstance(referenced, AppUser):
+        return referenced.full_name or referenced.username
+    return entity_label(referenced)
+
+
+def _audit_value(session: Session | None, key: str, value: Any) -> Any:
+    # DRAFT was a technical default, not a state in the agreed business flow.
+    if key == "status" and value == "DRAFT":
+        value = "CURRENT"
+    target = REFERENCE_FIELDS.get(key)
+    if target:
+        value = _reference_label(session, target, value)
+    return _json_value(value)
+
+
+def _audit_values(session: Session | None, values: dict[str, Any] | None) -> dict[str, Any] | None:
+    if values is None:
+        return None
+    return {key: _audit_value(session, key, value) for key, value in values.items()}
+
+
 def serialize_entity(entity: Any) -> dict[str, Any]:
     state = inspect(entity)
+    session = object_session(entity)
     result: dict[str, Any] = {}
     for attribute in state.mapper.column_attrs:
         key = attribute.key
@@ -94,7 +149,7 @@ def serialize_entity(entity: Any) -> dict[str, Any]:
             if getattr(entity, key, None):
                 result["password"] = "задан"
             continue
-        result[key] = _json_value(getattr(entity, key, None))
+        result[key] = _audit_value(session, key, getattr(entity, key, None))
     return result
 
 
@@ -374,8 +429,10 @@ class AuditBatch:
             if key in SENSITIVE_FIELDS:
                 changes["password"] = ("скрыт", "изменён")
                 continue
-            old = _json_value(history.deleted[0]) if history.deleted else original.get(key)
-            new = _json_value(history.added[-1]) if history.added else _json_value(getattr(entity, key, None))
+            old_raw = history.deleted[0] if history.deleted else original.get(key)
+            new_raw = history.added[-1] if history.added else getattr(entity, key, None)
+            old = _audit_value(self.session, key, old_raw)
+            new = _audit_value(self.session, key, new_raw)
             if old != new:
                 changes[key] = (old, new)
         return changes
@@ -395,6 +452,11 @@ class AuditBatch:
                     event.new = serialize_entity(event.entity)
                 if event.action == AuditAction.COPY and event.new and event.new.get("target_order_id") is None:
                     event.new["target_order_id"] = event.entity_id
+
+            # Store stable labels in the immutable event. Rendering the journal
+            # must not depend on the current name or existence of related rows.
+            event.old = _audit_values(self.session, event.old)
+            event.new = _audit_values(self.session, event.new)
 
             parent_id = None
             if event.parent:

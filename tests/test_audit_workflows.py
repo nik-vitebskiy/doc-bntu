@@ -11,6 +11,7 @@ from app.models import (
     AuditLog,
     Contract,
     DocumentAttachment,
+    Faculty,
     Order,
     Organization,
 )
@@ -138,8 +139,13 @@ def test_order_item_and_demand_create_update_delete_are_audited(session, contrac
     created = _after(session, start)
     item_create = next(row for row in created if row.entity_type == "order_item" and row.action == "CREATE")
     demand_create = next(row for row in created if row.entity_type == "annual_demand" and row.action == "CREATE")
+    order_create = next(row for row in created if row.entity_type == "order" and row.action == "CREATE")
     assert "Заказ договора" in item_create.entity_label and "TEST-ORDER" in item_create.entity_label
     assert "Заказ договора" in demand_create.entity_label and "TEST-ORDER" in demand_create.entity_label
+    assert order_create.diff["new"]["status"] == "CURRENT"
+    assert order_create.diff["new"]["contract_id"] == f"№{contract.number}"
+    assert order_create.diff["new"]["organization_id"] == contract.organization.short_name
+    assert order_create.diff["new"]["created_by"] == user.full_name
 
     start = max(row.id for row in created)
     save_item(
@@ -150,6 +156,8 @@ def test_order_item_and_demand_create_update_delete_are_audited(session, contrac
     item_update = next(row for row in updated if row.entity_type == "order_item" and row.action == "UPDATE")
     demand_update = next(row for row in updated if row.entity_type == "annual_demand" and row.action == "UPDATE")
     assert set(item_update.diff["new"]) == {"specialty_id"}
+    assert item_update.diff["new"]["specialty_id"].startswith("TEST-ORDER-NEW")
+    assert not isinstance(item_update.diff["new"]["specialty_id"], int)
     assert demand_update.diff == {"old": {"quantity": 2}, "new": {"quantity": 7}}
 
     start = max(row.id for row in updated)
@@ -157,6 +165,32 @@ def test_order_item_and_demand_create_update_delete_are_audited(session, contrac
     deleted = _after(session, start)
     assert any(row.entity_type == "order_item" and row.action == "DELETE" for row in deleted)
     assert any(row.entity_type == "annual_demand" and row.action == "DELETE" for row in deleted)
+
+
+def test_reference_values_are_snapshots_and_technical_fields_are_hidden(session, contract, user, actor):
+    item = save_item(
+        session, contract.id, "TEST-LABEL", "Инженер", {"demand_2027": "2"},
+        user_id=user.id, audit_actor=actor,
+    )
+    created = session.scalars(
+        select(AuditLog).where(AuditLog.entity_type == "order_item", AuditLog.entity_id == item.id)
+    ).one()
+    faculty_name = session.get(Faculty, item.faculty_id).name
+    assert created.diff["new"]["faculty_id"] == faculty_name
+    assert created.diff["new"]["specialty_id"].startswith("TEST-LABEL")
+
+    # Renaming the linked row later must not rewrite the historical snapshot.
+    session.get(Faculty, item.faculty_id).name = "Переименованный факультет"
+    session.commit()
+    assert session.get(AuditLog, created.id).diff["new"]["faculty_id"] == faculty_name
+
+    rendered = get_audit_registry(session).rows
+    rendered_item = next(row for row in rendered if row.id == created.id)
+    labels = {line.label for line in rendered_item.diff_lines}
+    assert "Факультет" in labels
+    assert "Специальность" in labels
+    assert "Идентификатор" not in labels
+    assert "Заказ" not in labels
 
 
 def test_scan_upload_download_soft_delete_and_restore_are_audited(session, contract, client):
@@ -208,6 +242,26 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
         select(AuditLog).where(AuditLog.entity_type == "excel_import", AuditLog.entity_label.contains("web-import"))
     ).one()
     assert web_event.user_id is not None
+    assert web_event.diff["new"] == {
+        "filename": "web-import.xlsx",
+        "rows_processed": 1,
+        "organizations": 1,
+        "contracts_created": 1,
+        "order_items_created": 1,
+        "faculty_links_created": 1,
+    }
+    rendered_import = get_audit_registry(session, action="FILE_UPLOAD", query="web-import").rows[0]
+    rendered_labels = [line.label for line in rendered_import.diff_lines]
+    assert rendered_labels == [
+        "Имя файла",
+        "Обработано строк",
+        "Загружено организаций",
+        "Создано договоров",
+        "Добавлено строк заказа",
+        "Связано факультетов",
+    ]
+    assert "Поле" not in rendered_labels
+    assert all("import-" not in line.new for line in rendered_import.diff_lines)
 
     path = tmp_path / "system-import.xlsx"
     path.write_bytes(_excel_bytes("Системный импорт", "999200002"))

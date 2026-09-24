@@ -23,7 +23,7 @@ def migrated_schema_is_complete():
         bntu_name = connection.execute(text(
             "SELECT value #>> '{}' FROM app_setting WHERE key = 'bntu.full_name'"
         )).scalar_one()
-    assert revision == "20260923_13"
+    assert revision == "20260924_14"
     assert faculty_count == 17
     assert bntu_name == "Белорусский национальный технический университет"
 
