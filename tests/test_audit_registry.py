@@ -1,7 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
-from app.models import AppUser, AuditLog, ContractRedirect, OrderRedirect
-from app.services.audit_registry_service import ACTION_LABELS, get_audit_registry
+from app.models import (
+    AdditionalAgreement, AnnualDemand, AppSetting, AppUser, Application,
+    ApplicationFaculty, AuditLog, Contract, ContractFaculty, Document,
+    DocumentAttachment, Faculty, Order, OrderItem, OrderRedirect,
+    ContractRedirect, Organization, Specialty,
+)
+from app.services.audit_metadata import FIELD_LABELS, HIDDEN_DIFF_FIELDS
+from app.services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
 from app.services.organization_service import delete_organization, get_or_create_order
 
 
@@ -79,6 +85,30 @@ def test_development_actions_and_demo_user_are_not_filter_options(session):
     assert all(user.username != "demo" for user in registry.users)
 
 
+def test_employee_facing_audit_labels_are_explicit():
+    assert ENTITY_FILTERS["order"][0] == "Строка заказа"
+    assert ACTION_LABELS["COPY"] == "Копирование заказа (активация д.с.)"
+    assert all("Черновик" not in label for label in ACTION_LABELS.values())
+
+
+def test_every_audited_model_field_has_a_russian_label_or_is_hidden():
+    models = (
+        Organization, Contract, ContractFaculty, AdditionalAgreement,
+        Application, ApplicationFaculty, Order, OrderItem, AnnualDemand,
+        Specialty, Faculty, Document, DocumentAttachment, AppUser, AppSetting,
+    )
+    special_fields = {"password_hash", "content"}
+    missing = {
+        f"{model.__tablename__}.{column.key}"
+        for model in models
+        for column in model.__mapper__.column_attrs
+        if column.key not in FIELD_LABELS
+        and column.key not in HIDDEN_DIFF_FIELDS
+        and column.key not in special_fields
+    }
+    assert missing == set()
+
+
 def test_pagination_is_fifty_and_newest_first(session, user):
     session.add_all([_row(user.id, index) for index in range(55)])
     session.commit()
@@ -113,6 +143,24 @@ def test_audit_page_renders_without_raw_json(session, user, client):
     assert "Смена статуса" in response.text
     assert "Тестовый комментарий" in response.text
     assert '"old"' not in response.text
+
+
+def test_legacy_draft_is_rendered_as_effective_status_without_mutating_event(session, user):
+    row = AuditLog(
+        user_id=user.id,
+        action="CREATE",
+        entity_type="order",
+        entity_id=77,
+        entity_label="Заказ договора №TEST",
+        diff={"old": {}, "new": {"id": 77, "contract_id": 1, "revision": 1, "status": "DRAFT"}},
+        sequence=1,
+    )
+    session.add(row)
+    session.commit()
+
+    rendered = get_audit_registry(session).rows[0]
+    assert [(line.label, line.new) for line in rendered.diff_lines] == [("Статус", "Действующий")]
+    assert session.get(AuditLog, row.id).diff["new"]["status"] == "DRAFT"
 
 
 def test_historical_contract_and_order_events_link_to_merged_contract(session, contract, user):
