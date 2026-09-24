@@ -170,9 +170,13 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
                           contracts_created, faculty_links_created, order_items_created)
     current_audit_batch(session).record_values(
         AuditAction.FILE_UPLOAD, "excel_import", None, f"Импорт Excel {display_name}",
-        new={"filename": display_name, "stored_name": path.name,
-             "rows_processed": result.rows_processed, "organizations": result.organizations,
-             "contracts": result.contracts, "faculties": result.faculties,
-             "specialties": result.specialties},
+        new={
+            "filename": display_name,
+            "rows_processed": result.rows_processed,
+            "organizations": result.organizations,
+            "contracts_created": result.contracts_created,
+            "order_items_created": result.order_items_created,
+            "faculty_links_created": result.faculty_links_created,
+        },
     )
     return result

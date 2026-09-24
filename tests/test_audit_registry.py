@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
 
 from app.models import (
     AdditionalAgreement, AnnualDemand, AppSetting, AppUser, Application,
@@ -7,7 +10,8 @@ from app.models import (
     ContractRedirect, Organization, Specialty,
 )
 from app.services.audit_metadata import FIELD_LABELS, HIDDEN_DIFF_FIELDS
-from app.services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
+from app.services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, _diff_lines, get_audit_registry
+from app.services.audit_service import AuditAction
 from app.services.organization_service import delete_organization, get_or_create_order
 
 
@@ -109,6 +113,35 @@ def test_every_audited_model_field_has_a_russian_label_or_is_hidden():
     assert missing == set()
 
 
+@pytest.mark.parametrize(("entity_type", "values"), [
+    ("organization", {"unp": "100000000", "short_name": "ОАО МТЗ", "full_name": "ОАО МТЗ", "legal_address": "Минск", "authority": "Минпром", "phone": "+375"}),
+    ("contract", {"number": "221", "start_date": "2026-01-01", "end_date": "2030-01-01", "status": "Активен"}),
+    ("additional_agreement", {"number": "1", "date": "2026-01-01", "status": "Активен", "previous_agreement_id": "№0", "activated_at": "2026-01-01T10:00:00+03:00"}),
+    ("application", {"number": "З-1", "received_date": "2026-01-01", "signed_date": "2026-01-02", "status": "Заявка"}),
+    ("order", {"status": "CURRENT", "is_current": True, "previous_order_id": "Заказ договора №221"}),
+    ("order_item", {"specialty_id": "7-01-01", "faculty_id": "Автотракторный", "qualification": "Инженер", "profile": "Профиль"}),
+    ("annual_demand", {"year": 2027, "quantity": 5}),
+    ("specialty", {"code": "7-01-01", "name": "Испытание", "qualification": "Инженер", "faculty": "Автотракторный"}),
+    ("faculty", {"name": "Автотракторный", "code": "АТФ"}),
+    ("document", {"type": "CONTRACT", "status": "CURRENT"}),
+    ("document_attachment", {"file_kind": "signed_scan", "original_name": "scan.pdf", "mime_type": "application/pdf", "size_bytes": 100}),
+    ("excel_import", {"filename": "МТЗ.xlsx", "rows_processed": 60, "organizations": 1, "contracts_created": 1, "order_items_created": 60, "faculty_links_created": 11}),
+    ("app_user", {"username": "head", "full_name": "Руководитель", "role": "HEAD", "is_active": True, "must_change_password": False, "password": "изменён"}),
+    ("app_setting", {"key": "bntu.unp", "value": "100354447", "description": "УНП"}),
+])
+def test_every_real_event_payload_has_named_fields(entity_type, values):
+    lines = _diff_lines(entity_type, {"old": {}, "new": values})
+    assert len(lines) == len(values)
+    assert all(line.label and line.label != "Поле" for line in lines)
+
+
+def test_documentation_covers_all_filter_types_and_actions():
+    documentation = Path("docs/audit-event-types.md").read_text(encoding="utf-8")
+    assert set(ACTION_LABELS) == {action.value for action in AuditAction}
+    assert all(label in documentation for label, _types in ENTITY_FILTERS.values())
+    assert all(label in documentation for label in ACTION_LABELS.values())
+
+
 def test_pagination_is_fifty_and_newest_first(session, user):
     session.add_all([_row(user.id, index) for index in range(55)])
     session.commit()
@@ -161,6 +194,56 @@ def test_legacy_draft_is_rendered_as_effective_status_without_mutating_event(ses
     rendered = get_audit_registry(session).rows[0]
     assert [(line.label, line.new) for line in rendered.diff_lines] == [("Статус", "Действующий")]
     assert session.get(AuditLog, row.id).diff["new"]["status"] == "DRAFT"
+
+
+def test_legacy_import_is_readable_and_hides_internal_filename(session, user):
+    row = AuditLog(
+        user_id=user.id,
+        action="FILE_UPLOAD",
+        entity_type="excel_import",
+        entity_id=None,
+        entity_label="Импорт Excel МТЗ-из базы.xlsx",
+        diff={"old": {}, "new": {
+            "filename": "МТЗ-из базы.xlsx",
+            "stored_name": "import-87f8b04c.xlsx",
+            "rows_processed": 60,
+            "organizations": 1,
+            "contracts": 1,
+            "faculties": 11,
+            "specialties": 60,
+        }},
+        sequence=1,
+    )
+    session.add(row)
+    session.commit()
+
+    rendered = get_audit_registry(session, action="FILE_UPLOAD").rows[0]
+    labels = [line.label for line in rendered.diff_lines]
+    assert labels == [
+        "Имя файла", "Обработано строк", "Загружено организаций",
+        "Обработано договоров", "Обработано факультетов", "Обработано специальностей",
+    ]
+    assert "Поле" not in labels
+    assert all("import-87f8b04c" not in line.new for line in rendered.diff_lines)
+
+
+def test_unmapped_diff_field_is_warned_and_hidden(session, user, caplog):
+    row = AuditLog(
+        user_id=user.id,
+        action="UPDATE",
+        entity_type="contract",
+        entity_id=1,
+        entity_label="Договор TEST",
+        diff={"old": {"future_field": "до"}, "new": {"future_field": "после"}},
+        sequence=1,
+    )
+    session.add(row)
+    session.commit()
+
+    rendered = get_audit_registry(session).rows[0]
+    assert rendered.diff_lines == []
+    assert "entity_type=contract field=future_field" in caplog.text
+    assert "Поле" not in caplog.text
 
 
 def test_historical_contract_and_order_events_link_to_merged_contract(session, contract, user):

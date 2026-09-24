@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -24,11 +25,19 @@ from ..models import (
     OrderRedirect,
     Organization,
 )
-from .audit_metadata import ACTION_LABELS, ENTITY_FILTERS, FIELD_LABELS, HIDDEN_DIFF_FIELDS, VALUE_LABELS
+from .audit_metadata import (
+    ACTION_LABELS,
+    ENTITY_FIELD_ORDER,
+    ENTITY_FILTERS,
+    FIELD_LABELS,
+    HIDDEN_DIFF_FIELDS,
+    VALUE_LABELS,
+)
 
 
 PAGE_SIZE = 50
 DISPLAY_TIMEZONE = ZoneInfo("Europe/Minsk")
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AuditDiffLine:
@@ -91,10 +100,13 @@ def _display_value(value: Any) -> str:
     return str(value)
 
 
-def _field_label(entity_type: str, key: str) -> str:
+def _field_label(entity_type: str, key: str) -> str | None:
     if entity_type == "app_user" and key == "full_name":
         return "ФИО"
-    return FIELD_LABELS.get(key, "Поле")
+    label = FIELD_LABELS.get(key)
+    if label is None:
+        logger.warning("Audit diff field has no display mapping: entity_type=%s field=%s", entity_type, key)
+    return label
 
 
 def _diff_lines(entity_type: str, diff: dict[str, Any] | None) -> list[AuditDiffLine]:
@@ -105,11 +117,18 @@ def _diff_lines(entity_type: str, diff: dict[str, Any] | None) -> list[AuditDiff
         key for key in dict.fromkeys([*old.keys(), *new.keys()])
         if key != "items" and key not in HIDDEN_DIFF_FIELDS
     ]
-    return [
-        AuditDiffLine(_field_label(entity_type, key), _display_value(old.get(key)), _display_value(new.get(key)))
-        for key in keys
-        if old.get(key) != new.get(key)
-    ]
+    preferred = ENTITY_FIELD_ORDER.get(entity_type, ())
+    rank = {key: index for index, key in enumerate(preferred)}
+    keys.sort(key=lambda key: (rank.get(key, len(rank)), key))
+    lines: list[AuditDiffLine] = []
+    for key in keys:
+        if old.get(key) == new.get(key):
+            continue
+        label = _field_label(entity_type, key)
+        if label is None:
+            continue
+        lines.append(AuditDiffLine(label, _display_value(old.get(key)), _display_value(new.get(key))))
+    return lines
 
 
 def _copied_items(diff: dict[str, Any] | None) -> tuple[str | None, list[str]]:

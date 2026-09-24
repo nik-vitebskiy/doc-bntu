@@ -67,19 +67,21 @@ FIELD_LABELS = {
     "code": "Код",
     "faculty": "Факультет",
     "type": "Тип документа",
-    "file_id": "Сохранённый файл",
     "original_filename": "Имя файла",
     "filename": "Имя файла",
-    "stored_name": "Сохранённый файл",
     "file_kind": "Назначение файла",
     "original_name": "Имя файла",
     "mime_type": "Формат файла",
     "size_bytes": "Размер, байт",
     "deleted_at": "Дата удаления",
     "rows_processed": "Обработано строк",
+    "organizations": "Загружено организаций",
+    "contracts": "Обработано договоров",
+    "faculties": "Обработано факультетов",
+    "specialties": "Обработано специальностей",
     "organizations_created": "Создано организаций",
     "contracts_created": "Создано договоров",
-    "faculty_links_created": "Добавлено факультетов",
+    "faculty_links_created": "Связано факультетов",
     "order_items_created": "Добавлено строк заказа",
     "username": "Логин",
     "password": "Пароль",
@@ -131,6 +133,11 @@ HIDDEN_DIFF_FIELDS = {
     "uploaded_at",
     "revision",
     "version",
+    "file_id",
+    "stored_name",
+    "source_order_id",
+    "target_order_id",
+    "rows_count",
 }
 
 # Foreign keys which carry business meaning and therefore remain visible.
@@ -151,5 +158,20 @@ REFERENCE_FIELDS = {
     "document_id": "document",
     "source_order_id": "order",
     "target_order_id": "order",
+}
+
+ENTITY_FIELD_ORDER = {
+    "excel_import": (
+        "filename",
+        "rows_processed",
+        "organizations",
+        "organizations_created",
+        "contracts_created",
+        "order_items_created",
+        "faculty_links_created",
+        "contracts",
+        "faculties",
+        "specialties",
+    ),
 }
 

@@ -242,6 +242,26 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
         select(AuditLog).where(AuditLog.entity_type == "excel_import", AuditLog.entity_label.contains("web-import"))
     ).one()
     assert web_event.user_id is not None
+    assert web_event.diff["new"] == {
+        "filename": "web-import.xlsx",
+        "rows_processed": 1,
+        "organizations": 1,
+        "contracts_created": 1,
+        "order_items_created": 1,
+        "faculty_links_created": 1,
+    }
+    rendered_import = get_audit_registry(session, action="FILE_UPLOAD", query="web-import").rows[0]
+    rendered_labels = [line.label for line in rendered_import.diff_lines]
+    assert rendered_labels == [
+        "Имя файла",
+        "Обработано строк",
+        "Загружено организаций",
+        "Создано договоров",
+        "Добавлено строк заказа",
+        "Связано факультетов",
+    ]
+    assert "Поле" not in rendered_labels
+    assert all("import-" not in line.new for line in rendered_import.diff_lines)
 
     path = tmp_path / "system-import.xlsx"
     path.write_bytes(_excel_bytes("Системный импорт", "999200002"))
