@@ -126,6 +126,46 @@ def test_order_history_page_is_read_only_and_supports_comparison_and_audit_link(
     assert f'entity_id" value="{current_order.id}"' in audit_page.text
 
 
+def test_document_cards_have_one_order_history_entry(session, contract, organization, user, actor, client):
+    save_item(
+        session,
+        contract.id,
+        "TEST-SINGLE-HISTORY",
+        "Инженер",
+        {"demand_2027": "1"},
+        user_id=user.id,
+        audit_actor=actor,
+    )
+    agreement = register_additional_agreement(
+        session, contract, "ДС-SINGLE", date(2026, 9, 24), user.id, audit_actor=actor
+    )
+
+    contract_page = client.get(f"/organizations/{organization.id}")
+    assert contract_page.status_code == 200
+    assert contract_page.text.count("История заказа") == 1
+    assert f'/contracts/{contract.id}/order-history' in contract_page.text
+    assert f'/additional-agreements/{agreement.id}/order-history' not in contract_page.text
+    assert "Сравнить заказ" in contract_page.text
+
+    agreement_page = client.get(f"/additional-agreements/{agreement.id}/comparison")
+    assert agreement_page.status_code == 200
+    assert agreement_page.text.count("История заказа") == 1
+
+    application = create_application(
+        session,
+        organization.id,
+        ["Тестовый факультет"],
+        "2026-09-24",
+        "З-SINGLE",
+        "",
+        user.id,
+        audit_actor=actor,
+    )
+    application_page = client.get(f"/applications/{application.id}")
+    assert application_page.status_code == 200
+    assert application_page.text.count("История заказа") == 1
+
+
 def test_revision_from_another_document_cannot_be_opened(session, contract, organization, user, actor, client):
     first_item = save_item(
         session,
