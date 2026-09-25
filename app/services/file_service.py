@@ -16,7 +16,6 @@ DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 MANUAL_FILE_KINDS = {"signed_scan", "source_file"}
 FILE_KIND_LABELS = {
     "signed_scan": "Подписанный скан",
-    "generated_docx": "Сформированный документ",
     "source_file": "Исходник от организации",
 }
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".docx"}
@@ -32,7 +31,7 @@ class AttachmentError(ValueError):
     pass
 
 
-def validate_attachment(filename: str, mime_type: str, content: bytes, *, generated: bool = False) -> tuple[str, str]:
+def validate_attachment(filename: str, mime_type: str, content: bytes) -> tuple[str, str]:
     safe_name = Path(filename or "").name.strip()
     if not safe_name:
         raise AttachmentError("У файла отсутствует имя.")
@@ -46,8 +45,6 @@ def validate_attachment(filename: str, mime_type: str, content: bytes, *, genera
         raise AttachmentError("Нельзя загрузить пустой файл.")
     if len(content) > MAX_FILE_SIZE:
         raise AttachmentError("Файл превышает допустимый размер 50 МБ.")
-    if generated and extension != ".docx":
-        raise AttachmentError("Сформированный системой документ должен быть DOCX.")
     return safe_name[:500], normalized_mime
 
 
@@ -98,9 +95,9 @@ def create_attachment(
     application: Application | None = None,
     agreement: AdditionalAgreement | None = None,
 ) -> DocumentAttachment:
-    if file_kind not in {*MANUAL_FILE_KINDS, "generated_docx"}:
+    if file_kind not in MANUAL_FILE_KINDS:
         raise AttachmentError("Выбран неизвестный тип файла.")
-    safe_name, normalized_mime = validate_attachment(filename, mime_type, content, generated=file_kind == "generated_docx")
+    safe_name, normalized_mime = validate_attachment(filename, mime_type, content)
     document = _document_for(session, contract=contract, application=application, agreement=agreement)
     attachment = DocumentAttachment(
         document=document,
@@ -130,8 +127,6 @@ def _audit_values(attachment: DocumentAttachment) -> dict:
 def delete_attachment(session: Session, attachment: DocumentAttachment, actor_id: int, actor_role: str) -> DocumentAttachment:
     if attachment.deleted_at is not None:
         raise AttachmentError("Файл уже удалён.")
-    if attachment.file_kind == "generated_docx":
-        raise AttachmentError("Сформированный системой документ удалять нельзя.")
     if actor_role != "ADMIN" and attachment.uploaded_by != actor_id:
         raise AttachmentError("Удалить файл может только его автор или администратор.")
     old = _audit_values(attachment)

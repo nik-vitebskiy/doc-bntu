@@ -41,6 +41,15 @@ def test_openapi_contains_only_documented_json_routes_and_cookie_security():
         "name": "session",
     }
     assert schema["paths"]["/api/auth/me"]["get"]["security"] == [{"cookieAuth": []}]
+    assert schema["paths"]["/api/auth/me"]["get"]["tags"] == ["auth", "settings"]
+    assert schema["paths"]["/api/auth/change-password"]["post"]["tags"] == ["auth", "settings"]
+    assert "вкладки «Профиль»" in schema["paths"]["/api/auth/me"]["get"]["description"]
+    assert "Поле повторного пароля" in schema["paths"]["/api/auth/change-password"]["post"]["description"]
+    user_schema = schema["components"]["schemas"]["AuthenticatedUserResponse"]
+    assert user_schema["properties"]["role"]["enum"] == ["ADMIN", "HEAD"]
+    password_schema = schema["components"]["schemas"]["ChangePasswordRequest"]
+    assert password_schema["properties"]["current_password"]["writeOnly"] is True
+    assert password_schema["properties"]["new_password"]["minLength"] == 8
     assert "/api/health" not in schema["paths"]
     assert "/login" not in schema["paths"]
 

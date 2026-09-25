@@ -16,14 +16,14 @@
   <header>
     <div class="brand">◈ <b>Кадровый заказ</b><small>prod</small></div>
     <form action="{{ '/contracts' if nav_is_active(request, 'contracts') else '/applications' if nav_is_active(request, 'applications') else '/' }}" class="topsearch"><input name="q" value="{{ q|default('') }}" placeholder="Поиск по организации и номеру документа..."></form>
-    <div class="user"><span>{{ request.state.user.full_name or request.state.user.username }} · {{ 'Администратор' if request.state.user.role == 'ADMIN' else 'Руководитель отдела' }}</span><a href="/change-password">Сменить пароль</a><a href="/logout">Выйти</a></div>
+    <div class="user"><span>{{ request.state.user.full_name or request.state.user.username }} · {{ 'Администратор' if request.state.user.role == 'ADMIN' else 'Руководитель отдела' }}</span><a href="/settings">Настройки</a><a href="/logout">Выйти</a></div>
   </header>
   <aside>
     <a class="{{ 'active' if nav_is_active(request, 'organizations') }}" href="/">▣ Организации-заказчики</a>
     <a class="{{ 'active' if nav_is_active(request, 'applications') }}" href="/applications">▤ Заявки</a>
     <a class="{{ 'active' if nav_is_active(request, 'contracts') }}" href="/contracts">▧ Договоры</a>
     <a class="{{ 'active' if nav_is_active(request, 'audit') }}" href="/audit">≣ Журнал действий</a>
-    {% if request.state.user.role == 'ADMIN' %}<a class="{{ 'active' if nav_is_active(request, 'users') }}" href="/users">♙ Пользователи</a><span></span><a class="{{ 'active' if nav_is_active(request, 'settings') }}" href="/settings">⚙ Настройки</a>{% endif %}
+    {% if request.state.user.role == 'ADMIN' %}<a class="{{ 'active' if nav_is_active(request, 'users') }}" href="/users">♙ Пользователи</a>{% endif %}<span></span><a class="{{ 'active' if nav_is_active(request, 'settings') }}" href="/settings">⚙ Настройки</a>
   </aside>
   <main>{% block content %}{% endblock %}</main>
 </body>

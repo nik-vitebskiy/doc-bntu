@@ -20,12 +20,12 @@ def migrated_schema_is_complete():
     with engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         faculty_count = connection.execute(text("SELECT count(*) FROM faculty")).scalar_one()
-        bntu_name = connection.execute(text(
-            "SELECT value #>> '{}' FROM app_setting WHERE key = 'bntu.full_name'"
+        bntu_count = connection.execute(text(
+            "SELECT count(*) FROM app_setting WHERE key LIKE 'bntu.%'"
         )).scalar_one()
-    assert revision == "20260924_14"
+    assert revision == "20260925_16"
     assert faculty_count == 17
-    assert bntu_name == "Белорусский национальный технический университет"
+    assert bntu_count == 0
 
 
 @pytest.fixture(autouse=True)

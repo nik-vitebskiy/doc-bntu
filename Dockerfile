@@ -6,6 +6,5 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY static ./static
-COPY templates ./templates
 RUN mkdir -p /app/data /app/uploads
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

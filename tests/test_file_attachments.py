@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models import AuditLog, DocumentAttachment
+from app.models import DocumentAttachment
 from app.services.file_service import (
     AttachmentError,
     MAX_FILE_SIZE,
@@ -19,6 +19,20 @@ def test_rejects_disallowed_extension_and_oversize_file():
         validate_attachment("virus.exe", "application/octet-stream", b"bad")
     with pytest.raises(AttachmentError, match="50 МБ"):
         validate_attachment("large.pdf", "application/pdf", b"x" * (MAX_FILE_SIZE + 1))
+
+
+def test_generated_document_is_not_an_attachment_kind(session, contract, actor, user):
+    with pytest.raises(AttachmentError, match="неизвестный тип"):
+        create_attachment(
+            session,
+            contract=contract,
+            filename="generated.docx",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            content=b"PK",
+            file_kind="generated_docx",
+            uploaded_by=user.id,
+            audit_actor=actor,
+        )
 
 
 def test_streams_large_bytea_in_chunks_without_loading_model_content(session, contract, actor, user):
@@ -42,29 +56,12 @@ def test_streams_large_bytea_in_chunks_without_loading_model_content(session, co
     assert sum(map(len, chunks)) == 41 * 1024 * 1024
 
 
-def test_generated_agreement_is_attached_and_cannot_be_deleted(session, contract, client, actor, user):
-    agreement = register_additional_agreement(
-        session, contract, "DS-FILE-1", date(2026, 9, 23), user.id, audit_actor=actor,
-    )
+def test_document_generation_route_is_removed(session, contract, client):
     response = client.get(f"/contracts/{contract.id}/agreement")
-    assert response.status_code == 200
-    assert response.content.startswith(b"PK")
-    session.expire_all()
-    attachment = session.scalars(
-        select(DocumentAttachment).where(DocumentAttachment.file_kind == "generated_docx")
-    ).one()
-    assert attachment.document.additional_agreement_id == agreement.id
-    assert attachment.content == response.content
-    upload = session.scalars(
-        select(AuditLog).where(AuditLog.entity_id == attachment.id, AuditLog.action == "FILE_UPLOAD")
-    ).one()
-    assert upload.diff["new"]["original_name"].endswith(".docx")
-    assert "content" not in upload.diff["new"]
-
-    response = client.post(f"/attachments/{attachment.id}/delete")
-    assert response.status_code == 303
-    session.expire_all()
-    assert session.get(DocumentAttachment, attachment.id).deleted_at is None
+    assert response.status_code == 404
+    page = client.get(f"/organizations/{contract.organization_id}")
+    assert response.request.url.path not in page.text
+    assert "Сформировать доп. соглашение" not in page.text
 
 
 def test_file_upload_endpoint_rejects_executable(session, contract, client):

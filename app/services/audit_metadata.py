@@ -25,7 +25,7 @@ ENTITY_FILTERS = {
     "document": ("Файл", {"document", "document_attachment", "excel_import"}),
     "faculty": ("Факультет", {"faculty", "contract_faculty", "application_faculty"}),
     "app_user": ("Пользователь", {"app_user"}),
-    "app_setting": ("Настройки", {"app_setting"}),
+    "app_setting": ("Системная настройка", {"app_setting"}),
 }
 
 FIELD_LABELS = {
@@ -106,7 +106,6 @@ VALUE_LABELS = {
     "APPLICATION": "Заявка",
     "ADDITIONAL_AGREEMENT": "Доп. соглашение",
     "signed_scan": "Подписанный скан",
-    "generated_docx": "Сформированный документ",
     "source_file": "Исходник от организации",
     "ADMIN": "Администратор",
     "HEAD": "Руководитель отдела",

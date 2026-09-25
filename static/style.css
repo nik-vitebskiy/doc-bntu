@@ -760,55 +760,6 @@ details form{
   max-width:920px
 }
 
-.settings-form{
-  display:grid;
-  gap:22px
-}
-
-.settings-form fieldset{
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:14px 18px;
-  padding:0;
-  border:0
-}
-
-.settings-form legend{
-  grid-column:1/-1;
-  margin-bottom:4px;
-  color:#152b4d;
-  font-size:18px;
-  font-weight:700
-}
-
-.settings-form label{
-  display:grid;
-  gap:6px;
-  color:#4e5d74;
-  font-weight:600
-}
-
-.settings-form input{
-  width:100%
-}
-
-.settings-wide{
-  grid-column:1/-1
-}
-
-.settings-form .button{
-  justify-self:start
-}
-
-@media(max-width:700px){
-  .settings-form fieldset{
-    grid-template-columns:1fr
-  }
-
-  .settings-wide{
-    grid-column:auto
-  }
-}
 
 .file-block{margin-top:20px}
 .file-block h2,.file-block p{margin:0}
