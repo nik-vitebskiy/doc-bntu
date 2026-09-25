@@ -127,7 +127,7 @@ def test_every_audited_model_field_has_a_russian_label_or_is_hidden():
     ("document_attachment", {"file_kind": "signed_scan", "original_name": "scan.pdf", "mime_type": "application/pdf", "size_bytes": 100}),
     ("excel_import", {"filename": "МТЗ.xlsx", "rows_processed": 60, "organizations": 1, "contracts_created": 1, "order_items_created": 60, "faculty_links_created": 11}),
     ("app_user", {"username": "head", "full_name": "Руководитель", "role": "HEAD", "is_active": True, "must_change_password": False, "password": "изменён"}),
-    ("app_setting", {"key": "bntu.unp", "value": "100354447", "description": "УНП"}),
+    ("app_setting", {"key": "audit_login_enabled", "value": True, "description": "Фиксировать входы"}),
 ])
 def test_every_real_event_payload_has_named_fields(entity_type, values):
     lines = _diff_lines(entity_type, {"old": {}, "new": values})

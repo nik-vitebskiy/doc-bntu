@@ -7,7 +7,6 @@ COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY pytest.ini ./pytest.ini
 COPY static ./static
-COPY templates ./templates
 COPY tests ./tests
 COPY docs ./docs
 RUN mkdir -p /app/data /app/uploads

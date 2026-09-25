@@ -79,9 +79,15 @@ def logout(request: Request, _user: AppUser = Security(require_api_user)):
 
 @router.get(
     "/me",
+    tags=["settings"],
     response_model=AuthenticatedUserResponse,
     responses={401: {"model": ErrorResponse, "description": "Сессия отсутствует"}},
-    summary="Получить текущего пользователя",
+    summary="Получить личные данные текущего сотрудника",
+    description=(
+        "Возвращает ФИО, логин, роль и признак обязательной смены пароля. "
+        "React использует ответ для вкладки «Профиль» раздела «Настройки». "
+        "Поля профиля доступны только для чтения."
+    ),
 )
 def current_user(user: AppUser = Security(require_api_user)):
     return _user_response(user)
@@ -89,6 +95,7 @@ def current_user(user: AppUser = Security(require_api_user)):
 
 @router.post(
     "/change-password",
+    tags=["settings"],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     responses={
@@ -97,6 +104,12 @@ def current_user(user: AppUser = Security(require_api_user)):
         422: {"description": "Новый пароль короче 8 символов"},
     },
     summary="Сменить свой пароль",
+    description=(
+        "Меняет пароль текущего сотрудника. Доступно администратору и руководителю. "
+        "Поле повторного пароля существует только в интерфейсе: React проверяет совпадение "
+        "двух новых паролей и отправляет серверу только current_password и new_password. "
+        "Пароли и их хеши не возвращаются и не попадают в журнал действий."
+    ),
 )
 def save_password(
     payload: ChangePasswordRequest,

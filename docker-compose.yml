@@ -24,7 +24,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
-      - ./templates:/app/templates
     depends_on:
       db:
         condition: service_healthy

@@ -4,9 +4,9 @@
   <div class="file-list">
     {% for attachment in attachments if not attachment.deleted_at %}
       <article class="file-row">
-        <span class="file-icon" aria-hidden="true">{{ '▧' if attachment.file_kind == 'generated_docx' else ('▣' if attachment.file_kind == 'signed_scan' else '◫') }}</span>
+        <span class="file-icon" aria-hidden="true">{{ '▣' if attachment.file_kind == 'signed_scan' else '◫' }}</span>
         <div class="file-info"><a href="/attachments/{{ attachment.id }}/download">{{ attachment.original_name }}</a><small>{{ file_kind_labels.get(attachment.file_kind, attachment.file_kind) }} · {{ attachment.size_bytes|filesize }} · {{ attachment.uploader.full_name or attachment.uploader.username if attachment.uploader else 'Система' }} · {{ attachment.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</small></div>
-        {% if attachment.file_kind != 'generated_docx' and (request.state.user.role == 'ADMIN' or attachment.uploaded_by == request.state.user.id) %}<form method="post" action="/attachments/{{ attachment.id }}/delete" onsubmit="return confirm('Удалить файл? Его можно будет восстановить.')"><button class="file-action" title="Удалить файл">Удалить</button></form>{% endif %}
+        {% if request.state.user.role == 'ADMIN' or attachment.uploaded_by == request.state.user.id %}<form method="post" action="/attachments/{{ attachment.id }}/delete" onsubmit="return confirm('Удалить файл? Его можно будет восстановить.')"><button class="file-action" title="Удалить файл">Удалить</button></form>{% endif %}
       </article>
     {% else %}<p class="file-empty">Файлы не прикреплены</p>{% endfor %}
   </div>

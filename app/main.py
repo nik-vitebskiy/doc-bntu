@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -12,7 +12,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from .api.router import OPENAPI_TAGS, router as api_router
 from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty
 from .services.import_service import import_xlsx
-from .services.document_service import render_agreement_bytes
 from .services.organization_service import compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
     authenticate,
@@ -26,7 +25,6 @@ from .services.auth_service import (
 from .services.application_service import create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
-from .services.admin_service import get_bntu_requisites, update_bntu_requisites
 from .services.document_status_service import StatusTransitionError, allowed_status_transitions, change_agreement_status, change_application_status, change_contract_status
 from .services.file_service import (
     AttachmentError,
@@ -43,7 +41,6 @@ from .services.file_service import (
 from .services.order_history_service import compare_revisions, get_order_history, get_revision, order_table
 from .services.document_registry_service import application_registry as get_application_registry, contract_registry as get_contract_registry
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
-from .template_builder import make_template
 logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True)
@@ -128,11 +125,6 @@ def urgency_class(end):
     value = expiry_urgency(end)
     return value.css_class if value else "neutral"
 views.env.globals["urgency"] = urgency_class
-
-@app.on_event("startup")
-def startup():
-    make_template()
-
 
 def show_docs_enabled() -> bool:
     return os.getenv("SHOW_DOCS", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -371,49 +363,8 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
 
 
 @app.get("/settings", response_class=HTMLResponse)
-def settings_form(request: Request, saved: str = ""):
-    require_admin(request)
-    session = db()
-    requisites = get_bntu_requisites(session)
-    session.close()
-    return views.TemplateResponse(request, "settings.html", {
-        "requisites": requisites,
-        "saved": saved == "1",
-    })
-
-
-@app.post("/settings")
-def save_settings(
-    request: Request,
-    full_name: str = Form(""),
-    signer_position: str = Form(""),
-    signer_name: str = Form(""),
-    power_of_attorney_number: str = Form(""),
-    power_of_attorney_date: str = Form(""),
-    legal_address: str = Form(""),
-    unp: str = Form(""),
-    okpo: str = Form(""),
-    bank_account: str = Form(""),
-    bank_name: str = Form(""),
-    bic: str = Form(""),
-):
-    require_admin(request)
-    session = db()
-    update_bntu_requisites(session, {
-        "full_name": full_name,
-        "signer_position": signer_position,
-        "signer_name": signer_name,
-        "power_of_attorney_number": power_of_attorney_number,
-        "power_of_attorney_date": power_of_attorney_date,
-        "legal_address": legal_address,
-        "unp": unp,
-        "okpo": okpo,
-        "bank_account": bank_account,
-        "bank_name": bank_name,
-        "bic": bic,
-    }, audit_actor=audit_actor(request))
-    session.close()
-    return RedirectResponse("/settings?saved=1", status_code=303)
+def settings_form(request: Request):
+    return views.TemplateResponse(request, "settings.html", {})
 
 
 @app.get("/audit", response_class=HTMLResponse)
@@ -971,32 +922,6 @@ def restore_deleted_attachment(request: Request, attachment_id: int):
         return attachment_error_redirect(destination, error)
     session.close()
     return RedirectResponse(destination, status_code=303)
-
-@app.get("/contracts/{contract_id}/agreement")
-def agreement(request: Request, contract_id: int):
-    s = db(); c = s.get(Contract, contract_id)
-    if not c: raise HTTPException(404)
-    filename = f"Дополнительное_соглашение_{contract_id}.docx"
-    content = render_agreement_bytes(c, get_bntu_requisites(s))
-    target = c.active_agreement
-    create_attachment(
-        s,
-        agreement=target if target else None,
-        contract=None if target else c,
-        filename=filename,
-        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        content=content,
-        file_kind="generated_docx",
-        uploaded_by=request.state.user.id,
-        audit_actor=audit_actor(request),
-    )
-    s.close()
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
-    )
-
 
 # The legacy Jinja interface remains fully operational, but HTML/form routes
 # are intentionally absent from the React API documentation. New JSON routes
