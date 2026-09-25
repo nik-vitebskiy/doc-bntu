@@ -3,10 +3,13 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+from .api.router import OPENAPI_TAGS, router as api_router
 from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty
 from .services.import_service import import_xlsx
 from .services.document_service import render_agreement_bytes
@@ -44,7 +47,19 @@ from .template_builder import make_template
 logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True)
-app = FastAPI(title="Кадровый заказ")
+app = FastAPI(
+    title="Кадровый заказ API",
+    description=(
+        "JSON API для React-интерфейса системы «Кадровый заказ». "
+        "Для проверки защищённых методов выполните POST /api/auth/login прямо в Swagger: "
+        "браузер сохранит session-cookie и будет отправлять её автоматически."
+    ),
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_tags=OPENAPI_TAGS,
+)
+app.include_router(api_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 views = Jinja2Templates(directory="app/views")
 views.env.filters["fromjson"] = json.loads
@@ -118,27 +133,61 @@ views.env.globals["urgency"] = urgency_class
 def startup():
     make_template()
 
+
+def show_docs_enabled() -> bool:
+    return os.getenv("SHOW_DOCS", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@app.get("/docs", include_in_schema=False)
+def swagger_ui():
+    if not show_docs_enabled():
+        raise HTTPException(404)
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} — Swagger UI",
+        swagger_ui_parameters={"persistAuthorization": True},
+    )
+
+
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/static") or path in {"/setup", "/login"}:
+    public_paths = {
+        "/setup", "/login", "/docs", "/openapi.json",
+        "/api/auth/login", "/api/health",
+    }
+    if path.startswith("/static") or path in public_paths:
         return await call_next(request)
     user_id = request.session.get("user_id")
     if not user_id:
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Требуется авторизация."}, status_code=401)
         session = db()
         destination = "/login" if has_users(session) else "/setup"
         session.close()
         return RedirectResponse(destination, status_code=303)
     s = db(); user = s.get(AppUser, user_id)
     if not user or not user.is_active:
-        destination = "/login" if has_users(s) else "/setup"
+        configured = has_users(s)
         s.close()
         request.session.clear()
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Требуется авторизация."}, status_code=401)
+        destination = "/login" if configured else "/setup"
         return RedirectResponse(destination, status_code=303)
     request.state.user = user
     must_change_password = user.must_change_password
     s.close()
-    if must_change_password and path not in {"/change-password", "/logout"}:
+    password_change_paths = {
+        "/change-password", "/logout", "/api/auth/me",
+        "/api/auth/logout", "/api/auth/change-password",
+    }
+    if must_change_password and path not in password_change_paths:
+        if path.startswith("/api/"):
+            return JSONResponse(
+                {"detail": "Необходимо сменить временный пароль."},
+                status_code=403,
+            )
         return RedirectResponse("/change-password", status_code=303)
     return await call_next(request)
 
@@ -947,3 +996,11 @@ def agreement(request: Request, contract_id: int):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+# The legacy Jinja interface remains fully operational, but HTML/form routes
+# are intentionally absent from the React API documentation. New JSON routes
+# are added under /api and document their request/response models explicitly.
+for route in app.routes:
+    if isinstance(route, APIRoute) and not route.path.startswith("/api/"):
+        route.include_in_schema = False
