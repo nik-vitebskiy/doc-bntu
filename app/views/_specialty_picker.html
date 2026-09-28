@@ -3,7 +3,7 @@
   <input class="specialty-search" type="search" value="{% if selected_specialty %}{{ selected_specialty.code }} — {{ selected_specialty.name }}{% endif %}" placeholder="Код или название специальности" autocomplete="off" aria-expanded="false"{% if picker_form_id %} form="{{ picker_form_id }}"{% endif %}>
   <div class="specialty-options" hidden>
     {% for specialty in specialties %}
-    <button type="button" data-specialty-option data-value="{{ specialty.code }}" data-label="{{ specialty.code }} — {{ specialty.name }}" data-search-text="{{ specialty.code|lower }} {{ specialty.name|lower }}">
+    <button type="button" data-specialty-option data-value="{{ specialty.code }}" data-label="{{ specialty.code }} — {{ specialty.name }}" data-qualification="{{ specialty.qualification or '' }}" data-search-text="{{ specialty.code|lower }} {{ specialty.name|lower }}">
       <strong>{{ specialty.code }}</strong><span>{{ specialty.name }}</span>
     </button>
     {% endfor %}

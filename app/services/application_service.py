@@ -44,6 +44,7 @@ def save_application_item(session, application, specialty, qualification, form_d
     else:
         item = OrderItem(order_id=order.id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
+    item.qualification_value = qualification.strip() or None
     for year, quantity in values.items():
         demand = next((row for row in item.annual_demands if row.year == year), None)
         if demand: demand.quantity = quantity

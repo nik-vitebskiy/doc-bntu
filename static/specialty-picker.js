@@ -7,6 +7,8 @@ document.querySelectorAll('[data-specialty-picker]').forEach((picker) => {
   const options = [...picker.querySelectorAll('[data-specialty-option]')];
   const empty = picker.querySelector('.specialty-empty');
   const error = picker.querySelector('.specialty-error');
+  const form = value.form || picker.closest('form');
+  const qualification = form?.elements.namedItem('qualification');
 
   const setOpen = (open) => {
     picker.classList.toggle('is-open', open);
@@ -44,11 +46,12 @@ document.querySelectorAll('[data-specialty-picker]').forEach((picker) => {
   options.forEach((option) => option.addEventListener('click', () => {
     value.value = option.dataset.value;
     search.value = option.dataset.label;
+    if (qualification) qualification.value = option.dataset.qualification || '';
     error.textContent = '';
     setOpen(false);
   }));
 
-  picker.closest('form')?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', (event) => {
     if (!value.value) {
       event.preventDefault();
       error.textContent = 'Выберите специальность из справочника.';

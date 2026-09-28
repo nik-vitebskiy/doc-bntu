@@ -114,6 +114,12 @@ def test_order_item_web_form_only_accepts_specialty_from_catalog(
         qualification="Инженер",
     )
     session.add(specialty)
+    specialty_without_qualification = Specialty(
+        code="CATALOG-02",
+        name="Специальность без квалификации",
+        qualification=None,
+    )
+    session.add(specialty_without_qualification)
     session.commit()
     faculty_id = contract.faculty_links[0].faculty_id
 
@@ -121,6 +127,8 @@ def test_order_item_web_form_only_accepts_specialty_from_catalog(
     assert page.status_code == 200
     assert "data-specialty-picker" in page.text
     assert "CATALOG-01 — Специальность из справочника" in page.text
+    assert 'data-qualification="Инженер"' in page.text
+    assert 'data-value="CATALOG-02"' in page.text
 
     rejected = client.post(
         f"/contracts/{contract.id}/items",
@@ -132,9 +140,27 @@ def test_order_item_web_form_only_accepts_specialty_from_catalog(
 
     accepted = client.post(
         f"/contracts/{contract.id}/items",
-        data={"faculty_id": faculty_id, "specialty": specialty.code, "qualification": ""},
+        data={
+            "faculty_id": faculty_id,
+            "specialty": specialty.code,
+            "qualification": "Инженер документа",
+        },
     )
     assert accepted.status_code == 303
     item = session.scalar(select(OrderItem).where(OrderItem.specialty_id == specialty.id))
     assert item is not None
+    assert item.qualification_value == "Инженер документа"
+
+    changed = client.post(
+        f"/items/{item.id}",
+        data={
+            "faculty_id": faculty_id,
+            "specialty": specialty_without_qualification.code,
+            "qualification": "",
+        },
+    )
+    assert changed.status_code == 303
+    session.expire_all()
+    assert item.specialty_id == specialty_without_qualification.id
+    assert item.qualification_value is None
 
