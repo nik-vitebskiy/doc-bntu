@@ -79,6 +79,8 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
         return row[index[label]] if label in index else None
 
     def has_field(label):
+        # Business rule: heterogeneous exports are expected; a missing column
+        # means "preserve the stored value", while an empty present cell may clear it.
         return label in index
 
     years = [(int(header), i) for i, header in enumerate(headers) if header.isdigit() and 2000 <= int(header) <= 2100]
