@@ -33,7 +33,7 @@ def _excel_bytes(organization="Импортируемая организация
         "Организация-заказчик", "УНП", "Факультет", "Номер договора",
         "Код специальности, направления специальности, специализации", "Квалификация", "2027",
     ])
-    sheet.append([organization, unp, "Автотракторный", "IMP-01", "7-01-01", "Инженер", 3])
+    sheet.append([organization, unp, "Автотракторный", "№IMP-01 от 01.01.2025", "7-01-01", "Инженер", 3])
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()

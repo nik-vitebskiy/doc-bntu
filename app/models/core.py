@@ -68,7 +68,9 @@ class Contract(Base):
     documents: Mapped[list["Document"]] = relationship(back_populates="contract")
     faculty_links: Mapped[list["ContractFaculty"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
     @property
-    def items(self): return [item for order in self.orders if order.is_current for item in order.items]
+    def current_order(self): return next((order for order in self.orders if order.is_current), None)
+    @property
+    def items(self): return self.current_order.items if self.current_order else []
     @property
     def specialty_codes(self): return list(dict.fromkeys(item.specialty for item in self.items))
     @property
@@ -184,6 +186,7 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String(30), default="CURRENT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
+    import_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     contract: Mapped[Contract | None] = relationship(back_populates="orders")
     additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="orders")
     application: Mapped[Application | None] = relationship(back_populates="orders")

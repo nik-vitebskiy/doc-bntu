@@ -25,7 +25,7 @@ def sample_workbook():
     ])
     for index in range(60):
         sheet.append([
-            'ОАО "МТЗ"', "100316761", f"Факультет {index % 11 + 1}", "МТЗ-1",
+            'ОАО "МТЗ"', "100316761", f"Факультет {index % 11 + 1}", "№МТЗ-1 от 01.10.2020",
             "Минский тракторный завод", "Минск", "Активен",
             "01.10.2020", "31.12.2030", f"TEST-{index + 1:02d}",
             "Инженер", index + 1, index + 2,
@@ -72,7 +72,7 @@ def test_import_creates_one_shared_contract_and_repeat_is_idempotent(session, us
         "organization": 1, "contract": 1, "contract_faculty": 11,
         "order_item": 60, "annual_demand": 120,
     }
-    assert session.get(Contract, contract.id).status == "Закрыт"
+    assert session.get(Contract, contract.id).status == "Активен"
 
 
 def test_registry_splits_shared_contract_by_faculty(session, user, tmp_path):
@@ -100,7 +100,7 @@ def test_same_specialty_in_two_faculties_is_not_collapsed(session, user, tmp_pat
     sheet.append(["Организация-заказчик", "УНП", "Факультет", "Номер договора",
                   "Код специальности, направления специальности, специализации"])
     for faculty in ("Факультет А", "Факультет Б"):
-        sheet.append(["Завод", "100316761", faculty, "ОБЩ-1", "CODE-01"])
+        sheet.append(["Завод", "100316761", faculty, "№ОБЩ-1 от 01.01.2025", "CODE-01"])
     path = tmp_path / "shared.xlsx"
     workbook.save(path)
     result = import_xlsx(session, path, user.id)
@@ -125,8 +125,8 @@ def test_import_without_optional_columns_preserves_existing_values(session, user
     sheet = workbook.active
     sheet.append(["Организация-заказчик", "УНП", "Факультет", "Номер договора",
                   "Код специальности, направления специальности, специализации"])
-    sheet.append(["Завод", "100316761", "Факультет А", "Д-1", "CODE-OLD"])
-    sheet.append(["Завод", "100316761", "Факультет А", "Д-1", "CODE-NEW"])
+    sheet.append(["Завод", "100316761", "Факультет А", "№Д-1 от 01.01.2025", "CODE-OLD"])
+    sheet.append(["Завод", "100316761", "Факультет А", "№Д-1 от 01.01.2025", "CODE-NEW"])
     path = tmp_path / "without_optional_columns.xlsx"
     workbook.save(path)
 
@@ -154,7 +154,7 @@ def test_import_without_qualification_keeps_existing_order_item_value(session, u
     sheet = workbook.active
     sheet.append(["Организация-заказчик", "УНП", "Факультет", "Номер договора",
                   "Код специальности, направления специальности, специализации"])
-    sheet.append(['ОАО "МТЗ"', "100316761", "Факультет 1", "МТЗ-1", "TEST-01"])
+    sheet.append(['ОАО "МТЗ"', "100316761", "Факультет 1", "№МТЗ-1 от 01.10.2020", "TEST-01"])
     workbook.save(path)
 
     import_xlsx(session, path, user.id)

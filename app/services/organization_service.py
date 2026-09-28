@@ -23,6 +23,10 @@ def ensure_current_order(order: Order) -> Order:
         raise InactiveOrderRevisionError(
             "Заменённую редакцию заказа нельзя изменять. Откройте действующую редакцию."
         )
+    if order.import_key:
+        raise InactiveOrderRevisionError(
+            "Импортированный заказ доступен только для чтения. Создайте дополнительное соглашение для изменений."
+        )
     return order
 
 

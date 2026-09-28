@@ -137,6 +137,7 @@ HIDDEN_DIFF_FIELDS = {
     "source_order_id",
     "target_order_id",
     "rows_count",
+    "import_key",
 }
 
 # Foreign keys which carry business meaning and therefore remain visible.
