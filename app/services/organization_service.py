@@ -14,6 +14,18 @@ FACULTY_NAME_ALIASES = {
 }
 
 
+class InactiveOrderRevisionError(ValueError):
+    """Raised when a mutation targets a replaced order revision."""
+
+
+def ensure_current_order(order: Order) -> Order:
+    if not order.is_current:
+        raise InactiveOrderRevisionError(
+            "Заменённую редакцию заказа нельзя изменять. Откройте действующую редакцию."
+        )
+    return order
+
+
 @dataclass(frozen=True)
 class RegistryRow:
     contract: Contract
@@ -39,8 +51,17 @@ def get_or_create_faculty(session, name):
 
 
 def get_or_create_order(session, contract, user_id=None):
-    order = session.query(Order).filter_by(contract_id=contract.id).order_by(Order.id).first()
+    order = (
+        session.query(Order)
+        .filter_by(contract_id=contract.id, is_current=True)
+        .order_by(Order.revision.desc(), Order.id.desc())
+        .first()
+    )
     if not order:
+        if session.query(Order.id).filter_by(contract_id=contract.id).first():
+            raise InactiveOrderRevisionError(
+                "У договора нет действующей редакции заказа."
+            )
         order = Order(organization_id=contract.organization_id, contract_id=contract.id, created_by=user_id)
         session.add(order)
         session.flush()
@@ -248,7 +269,13 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
         if catalog_only
         else get_or_create_specialty(session, specialty, qualification, ", ".join(contract.faculty_names))
     )
-    item = item or OrderItem(order_id=get_or_create_order(session, contract, user_id).id, specialty_id=specialty_ref.id)
+    if item:
+        if item.order.contract_id != contract.id:
+            raise ValueError("Строка заказа не относится к этому договору.")
+        ensure_current_order(item.order)
+    else:
+        current_order = get_or_create_order(session, contract, user_id)
+        item = OrderItem(order_id=current_order.id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
     item.faculty_id = faculty_id
     for year, quantity in values.items():
@@ -263,6 +290,7 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
 
 @audited
 def delete_item(session, item: OrderItem):
+    ensure_current_order(item.order)
     destination = {
         "organization_id": item.order.contract.organization_id if item.order.contract else None,
         "application_id": item.order.application_id,

@@ -2,7 +2,7 @@ from datetime import date
 
 from ..models import AnnualDemand, Application, ApplicationFaculty, Order, OrderItem
 from .audit_service import audited
-from .organization_service import get_or_create_faculty, get_or_create_specialty, get_specialty_from_catalog
+from .organization_service import ensure_current_order, get_or_create_faculty, get_or_create_specialty, get_specialty_from_catalog
 
 
 @audited
@@ -35,7 +35,14 @@ def save_application_item(session, application, specialty, qualification, form_d
         else get_or_create_specialty(session, specialty, qualification, ", ".join(application.faculty_names))
     )
     order = application.current_order
-    item = item or OrderItem(order_id=order.id, specialty_id=specialty_ref.id)
+    if not order:
+        raise ValueError("У заявки нет действующей редакции заказа.")
+    if item:
+        if item.order.application_id != application.id:
+            raise ValueError("Строка заказа не относится к этой заявке.")
+        ensure_current_order(item.order)
+    else:
+        item = OrderItem(order_id=order.id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
     for year, quantity in values.items():
         demand = next((row for row in item.annual_demands if row.year == year), None)

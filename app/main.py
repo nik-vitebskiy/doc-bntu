@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .api.router import OPENAPI_TAGS, router as api_router
 from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
-from .services.organization_service import compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
+from .services.organization_service import InactiveOrderRevisionError, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
     authenticate,
     change_password,
@@ -592,6 +592,9 @@ async def add_application_item(request: Request, application_id: int, specialty:
     if not application: raise HTTPException(404)
     try:
         save_application_item(s, application, specialty, qualification, await request.form(), catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -604,6 +607,9 @@ async def edit_application_item(request: Request, item_id: int, specialty: str =
     application = s.get(Application, item.order.application_id)
     try:
         save_application_item(s, application, specialty, qualification, await request.form(), item, catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -843,6 +849,9 @@ async def add_item(contract_id: int, request: Request, specialty: str = Form(...
     organization_id = c.organization_id
     try:
         save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -857,6 +866,9 @@ async def edit_item(item_id: int, request: Request, specialty: str = Form(...), 
     organization_id = item.contract.organization_id
     try:
         save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -867,7 +879,11 @@ async def edit_item(item_id: int, request: Request, specialty: str = Form(...), 
 def remove_item(request: Request, item_id: int):
     s = db(); item = s.get(OrderItem, item_id)
     if not item: raise HTTPException(404)
-    destination = delete_item(s, item, audit_actor=audit_actor(request))
+    try:
+        destination = delete_item(s, item, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     if destination["application_id"]:
         return RedirectResponse(f"/applications/{destination['application_id']}", status_code=303)
     return RedirectResponse(f"/organizations/{destination['organization_id']}", status_code=303)
