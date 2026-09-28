@@ -59,6 +59,14 @@ def get_or_create_specialty(session, code, qualification="", faculty=""):
     return specialty
 
 
+def get_specialty_from_catalog(session, code):
+    normalized_code = str(code or "").strip()
+    specialty = session.query(Specialty).filter(func.lower(Specialty.code) == normalized_code.lower()).first()
+    if not specialty:
+        raise ValueError("Выберите специальность из справочника.")
+    return specialty
+
+
 def registry(session, query_text="", faculty="", end_year="", urgency=""):
     all_faculties = session.query(Faculty).order_by(Faculty.name).all()
     faculties = [row.name for row in all_faculties]
@@ -90,7 +98,9 @@ def registry(session, query_text="", faculty="", end_year="", urgency=""):
             faculty_ref = faculty_by_id.get(faculty_id)
             if not faculty_ref or (faculty and faculty_ref.name != faculty):
                 continue
-            if needle and not (needle in contract.organization.name.casefold() or needle in contract.number.casefold()
+            if needle and not (needle in contract.organization.name.casefold()
+                               or needle in (contract.organization.full_name or "").casefold()
+                               or needle in contract.number.casefold()
                                or any(needle in code.casefold() for code in codes)):
                 continue
             rows.append(RegistryRow(
@@ -156,8 +166,24 @@ def delete_organization(session, organization: Organization):
     session.delete(organization)
 
 
+def _contract_dates(start_date: str, end_date: str) -> tuple[date, date | None]:
+    if not str(start_date or "").strip():
+        raise ValueError("Укажите дату начала договора.")
+    try:
+        parsed_start = date.fromisoformat(start_date)
+    except ValueError as error:
+        raise ValueError("Укажите корректную дату начала договора.") from error
+    try:
+        parsed_end = date.fromisoformat(end_date) if end_date else None
+    except ValueError as error:
+        raise ValueError("Укажите корректную дату окончания договора.") from error
+    if parsed_end and parsed_end < parsed_start:
+        raise ValueError("Дата окончания не может быть раньше даты начала.")
+    return parsed_start, parsed_end
+
+
 @audited
-def create_contract(session, organization_id, faculties, number, end_date):
+def create_contract(session, organization_id, faculties, number, end_date, start_date=None):
     normalized_number = number.strip() or "Без номера"
     if session.query(Contract.id).filter_by(organization_id=organization_id, number=normalized_number).first():
         raise ValueError("Договор с таким номером у этой организации уже существует.")
@@ -165,8 +191,12 @@ def create_contract(session, organization_id, faculties, number, end_date):
     selected = [get_or_create_faculty(session, name) for name in names if name.strip()]
     if not selected:
         selected = [get_or_create_faculty(session, "Не указан")]
-    contract = Contract(organization_id=organization_id, number=normalized_number, start_date=date.today(),
-                        end_date=date.fromisoformat(end_date) if end_date else None,
+    parsed_start, parsed_end = _contract_dates(
+        date.today().isoformat() if start_date is None else start_date,
+        end_date,
+    )
+    contract = Contract(organization_id=organization_id, number=normalized_number, start_date=parsed_start,
+                        end_date=parsed_end,
                         status="Активен")
     session.add(contract)
     session.flush()
@@ -181,9 +211,10 @@ def update_contract(session, contract: Contract, number: str, start_date: str, e
     if session.query(Contract.id).filter(Contract.organization_id == contract.organization_id,
                                           Contract.number == normalized_number, Contract.id != contract.id).first():
         raise ValueError("Договор с таким номером у этой организации уже существует.")
+    parsed_start, parsed_end = _contract_dates(start_date, end_date)
     contract.number = normalized_number
-    contract.start_date = date.fromisoformat(start_date)
-    contract.end_date = date.fromisoformat(end_date) if end_date else None
+    contract.start_date = parsed_start
+    contract.end_date = parsed_end
     names = {name.strip() for name in faculties if name.strip()}
     selected = session.query(Faculty).filter(Faculty.name.in_(names)).all()
     if len(selected) != len(names):
@@ -203,7 +234,7 @@ def update_contract(session, contract: Contract, number: str, start_date: str, e
 
 
 @audited
-def save_item(session, contract_id, specialty, qualification, form_data, item=None, user_id=None):
+def save_item(session, contract_id, specialty, qualification, form_data, item=None, user_id=None, catalog_only=False):
     values = {int(key.removeprefix("demand_")): int(value) if str(value).strip().isdigit() else 0
               for key, value in form_data.items() if key.startswith("demand_")}
     contract = session.get(Contract, contract_id)
@@ -212,7 +243,11 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
     faculty_id = int(form_data.get("faculty_id") or (item.faculty_id if item else 0) or default_faculty)
     if faculty_id not in allowed:
         raise ValueError("Выберите факультет из списка факультетов договора.")
-    specialty_ref = get_or_create_specialty(session, specialty, qualification, ", ".join(contract.faculty_names))
+    specialty_ref = (
+        get_specialty_from_catalog(session, specialty)
+        if catalog_only
+        else get_or_create_specialty(session, specialty, qualification, ", ".join(contract.faculty_names))
+    )
     item = item or OrderItem(order_id=get_or_create_order(session, contract, user_id).id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
     item.faculty_id = faculty_id

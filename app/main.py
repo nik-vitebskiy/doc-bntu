@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from .api.router import OPENAPI_TAGS, router as api_router
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
 from .services.organization_service import compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
@@ -557,7 +557,8 @@ def application_card(request: Request, application_id: int, file_error: str = ""
     if not application: raise HTTPException(404)
     load_attachment_relations(application)
     years = list(range(date.today().year, date.today().year + 10))
-    response = views.TemplateResponse(request, "application.html", {"application": application, "years": years, "file_error": file_error})
+    specialties = s.query(Specialty).order_by(Specialty.code, Specialty.name).all()
+    response = views.TemplateResponse(request, "application.html", {"application": application, "years": years, "specialties": specialties, "file_error": file_error})
     s.close()
     return response
 
@@ -589,7 +590,11 @@ def set_application_status(request: Request, application_id: int, status: str = 
 async def add_application_item(request: Request, application_id: int, specialty: str = Form(...), qualification: str = Form("")):
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
-    save_application_item(s, application, specialty, qualification, await request.form(), audit_actor=audit_actor(request))
+    try:
+        save_application_item(s, application, specialty, qualification, await request.form(), catalog_only=True, audit_actor=audit_actor(request))
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/application-items/{item_id}")
@@ -597,7 +602,11 @@ async def edit_application_item(request: Request, item_id: int, specialty: str =
     s = db(); item = s.get(OrderItem, item_id)
     if not item or not item.order.application_id: raise HTTPException(404)
     application = s.get(Application, item.order.application_id)
-    save_application_item(s, application, specialty, qualification, await request.form(), item, audit_actor=audit_actor(request))
+    try:
+        save_application_item(s, application, specialty, qualification, await request.form(), item, catalog_only=True, audit_actor=audit_actor(request))
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
     return RedirectResponse(f"/applications/{application.id}", status_code=303)
 
 @app.post("/applications/{application_id}/files")
@@ -656,7 +665,17 @@ def edit_organization(request: Request, org_id: int, name: str = Form(...), full
     return RedirectResponse(f"/organizations/{org.id}", status_code=303)
 
 @app.get("/organizations/{org_id}", response_class=HTMLResponse)
-def organization(request: Request, org_id: int, faculty_id: int | None = None, file_error: str = ""):
+def organization(
+    request: Request,
+    org_id: int,
+    faculty_id: int | None = None,
+    file_error: str = "",
+    contract_date_error: str = "",
+    contract_date_error_field: str = "",
+    contract_start_date: str = "",
+    contract_end_date: str = "",
+    contract_number: str = "",
+):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
     context_faculty = s.get(Faculty, faculty_id) if faculty_id is not None else None
@@ -666,18 +685,42 @@ def organization(request: Request, org_id: int, faculty_id: int | None = None, f
         for agreement in contract.agreements:
             load_attachment_relations(agreement)
     years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
-    response = views.TemplateResponse(request, "organization.html", {"org": org, "contracts": contracts, "context_faculty": context_faculty, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all(), "file_error": file_error})
+    response = views.TemplateResponse(request, "organization.html", {
+        "org": org,
+        "contracts": contracts,
+        "context_faculty": context_faculty,
+        "years": years,
+        "all_faculties": s.query(Faculty).order_by(Faculty.name).all(),
+        "specialties": s.query(Specialty).order_by(Specialty.code, Specialty.name).all(),
+        "file_error": file_error,
+        "contract_date_error": contract_date_error,
+        "contract_date_error_field": contract_date_error_field,
+        "contract_start_date": contract_start_date,
+        "contract_end_date": contract_end_date,
+        "contract_number": contract_number,
+    })
     s.close()
     return response
 
 @app.post("/organizations/{org_id}/contract")
-def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), end_date: str = Form("")):
+def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), start_date: str = Form(""), end_date: str = Form("")):
     s = db()
     try:
-        create_contract(s, org_id, faculty, number, end_date, audit_actor=audit_actor(request))
+        create_contract(s, org_id, faculty, number, end_date, start_date=start_date, audit_actor=audit_actor(request))
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
+        message = str(error)
+        if "дат" in message.lower():
+            error_field = "start_date" if message.lower().startswith("укажите") and "начала" in message.lower() else "end_date"
+            query = urlencode({
+                "contract_date_error": message,
+                "contract_date_error_field": error_field,
+                "contract_start_date": start_date,
+                "contract_end_date": end_date,
+                "contract_number": number,
+            })
+            return RedirectResponse(f"/organizations/{org_id}?{query}", status_code=303)
+        raise HTTPException(400, message) from error
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
@@ -799,7 +842,7 @@ async def add_item(contract_id: int, request: Request, specialty: str = Form(...
     form = await request.form()
     organization_id = c.organization_id
     try:
-        save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, audit_actor=audit_actor(request))
+        save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -813,7 +856,7 @@ async def edit_item(item_id: int, request: Request, specialty: str = Form(...), 
     form = await request.form()
     organization_id = item.contract.organization_id
     try:
-        save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, audit_actor=audit_actor(request))
+        save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error

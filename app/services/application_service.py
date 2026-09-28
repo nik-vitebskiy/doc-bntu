@@ -2,7 +2,7 @@ from datetime import date
 
 from ..models import AnnualDemand, Application, ApplicationFaculty, Order, OrderItem
 from .audit_service import audited
-from .organization_service import get_or_create_faculty, get_or_create_specialty
+from .organization_service import get_or_create_faculty, get_or_create_specialty, get_specialty_from_catalog
 
 
 @audited
@@ -26,10 +26,14 @@ def update_application(session, application, number, signed_date):
 
 
 @audited
-def save_application_item(session, application, specialty, qualification, form_data, item=None):
+def save_application_item(session, application, specialty, qualification, form_data, item=None, catalog_only=False):
     values = {int(key.removeprefix("demand_")): int(value) if str(value).strip().isdigit() else 0
               for key, value in form_data.items() if key.startswith("demand_")}
-    specialty_ref = get_or_create_specialty(session, specialty, qualification, ", ".join(application.faculty_names))
+    specialty_ref = (
+        get_specialty_from_catalog(session, specialty)
+        if catalog_only
+        else get_or_create_specialty(session, specialty, qualification, ", ".join(application.faculty_names))
+    )
     order = application.current_order
     item = item or OrderItem(order_id=order.id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id

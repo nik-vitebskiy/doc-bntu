@@ -32,11 +32,8 @@ def _validate_comment(
     comment: str,
 ) -> str:
     value = comment.strip()
-    reverse_application = current_status == STATUS_CLOSED and target_status == STATUS_APPLICATION
-    if document_type != "contract" and target_status == STATUS_CLOSED and not value:
+    if document_type == "additional_agreement" and target_status == STATUS_CLOSED and not value:
         raise StatusTransitionError("При закрытии документа необходимо указать комментарий.")
-    if reverse_application and role == "ADMIN" and not value:
-        raise StatusTransitionError("Для обратного перехода необходимо указать комментарий.")
     return value
 
 
