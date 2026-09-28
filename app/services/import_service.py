@@ -78,6 +78,9 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
     def field(row, label):
         return row[index[label]] if label in index else None
 
+    def has_field(label):
+        return label in index
+
     years = [(int(header), i) for i, header in enumerate(headers) if header.isdigit() and 2000 <= int(header) <= 2100]
     seen_organizations, seen_contracts, seen_faculties, seen_specialties = set(), set(), set(), set()
     rows_processed = organizations_created = contracts_created = faculty_links_created = order_items_created = 0
@@ -99,10 +102,14 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
             organizations_created += 1
         else:
             organization.short_name = name
-            organization.full_name = full_name
-            organization.legal_address = address
-            organization.authority = authority
-            organization.phone = phone
+            if has_field("Полное наименование"):
+                organization.full_name = full_name
+            if has_field("Адрес юридический"):
+                organization.legal_address = address
+            if has_field("Ведомство"):
+                organization.authority = authority
+            if has_field("Телефоны"):
+                organization.phone = phone
         seen_organizations.add(organization.id)
 
         faculty_name = text(field(row, "Факультет"))
@@ -125,7 +132,8 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
         else:
             if start_date:
                 contract.start_date = start_date
-            contract.end_date = end_date
+            if has_field("Дата окончания договора"):
+                contract.end_date = end_date
         seen_contracts.add(contract.id)
 
         if not session.get(ContractFaculty, (contract.id, faculty.id)):
@@ -135,7 +143,8 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
 
         specialty_code = text(field(row, "Код специальности, направления специальности, специализации"))
         if specialty_code:
-            qualification = text(field(row, "Квалификация"))
+            has_qualification = has_field("Квалификация")
+            qualification = text(field(row, "Квалификация")) if has_qualification else ""
             specialty = get_or_create_specialty(session, specialty_code, qualification, faculty_name)
             seen_specialties.add(specialty_code)
             order = get_or_create_order(session, contract, user_id)
@@ -149,7 +158,8 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
                 session.flush()
                 order_items_created += 1
             else:
-                item.qualification_value = qualification or None
+                if has_qualification:
+                    item.qualification_value = qualification or None
             for year, column in years:
                 try:
                     quantity = int(row[column] or 0)
