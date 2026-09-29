@@ -54,6 +54,7 @@ FIELD_LABELS = {
     "status": "Статус",
     "start_date": "Дата начала",
     "end_date": "Дата окончания",
+    "date_end": "Действует до",
     "date": "Дата",
     "received_date": "Дата получения",
     "signed_date": "Дата подписания",

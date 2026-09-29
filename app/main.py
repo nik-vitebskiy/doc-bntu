@@ -661,16 +661,19 @@ async def upload_import(request: Request, file: UploadFile = File(...)):
 def new_org(request: Request): return views.TemplateResponse(request, "organization_form.html", {})
 
 @app.post("/organizations/new")
-def create_org(request: Request, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form("")):
-    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{org.id}", status_code=303)
+def create_org(request: Request, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
+    org_id = org.id
+    s.close()
+    return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.post("/organizations/{org_id}")
 def edit_organization(request: Request, org_id: int, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
     update_organization(s, org, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{org.id}", status_code=303)
+    s.close()
+    return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.get("/organizations/{org_id}", response_class=HTMLResponse)
 def organization(
