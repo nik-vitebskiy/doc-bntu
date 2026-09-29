@@ -170,6 +170,7 @@ class Specialty(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(50), unique=True)
     name: Mapped[str] = mapped_column(String(255))
+    profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
     qualification: Mapped[str | None] = mapped_column(String(255), nullable=True)
     faculty: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

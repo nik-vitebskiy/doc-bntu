@@ -23,7 +23,7 @@ def migrated_schema_is_complete():
         bntu_count = connection.execute(text(
             "SELECT count(*) FROM app_setting WHERE key LIKE 'bntu.%'"
         )).scalar_one()
-    assert revision == "20260929_20"
+    assert revision == "20260929_21"
     assert faculty_count == 17
     assert bntu_count == 0
 

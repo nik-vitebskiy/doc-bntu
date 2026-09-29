@@ -42,6 +42,7 @@ from .services.file_service import (
 from .services.order_history_service import compare_revisions, get_order_history, get_revision, order_table
 from .services.document_registry_service import application_registry as get_application_registry, contract_registry as get_contract_registry
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
+from .services.specialty_service import specialty_registry, update_specialty
 logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True)
@@ -112,6 +113,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "audit": ("/audit",),
         "users": ("/users",),
         "settings": ("/settings",),
+        "specialties": ("/specialties",),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -366,6 +368,42 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_form(request: Request):
     return views.TemplateResponse(request, "settings.html", {})
+
+
+@app.get("/specialties", response_class=HTMLResponse)
+def specialties_registry(request: Request, q: str = "", page: int = 1):
+    session = db()
+    registry = specialty_registry(session, q, page)
+    pagination_query = urlencode({"q": q}) if q else ""
+    response = views.TemplateResponse(request, "specialties.html", {
+        "registry": registry,
+        "q": q,
+        "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+    })
+    session.close()
+    return response
+
+
+@app.post("/specialties/{specialty_id}")
+def save_specialty(
+    request: Request,
+    specialty_id: int,
+    name: str = Form(""),
+    profile: str = Form(""),
+    qualification: str = Form(""),
+):
+    require_admin(request)
+    session = db()
+    specialty = session.get(Specialty, specialty_id)
+    if not specialty:
+        session.close()
+        raise HTTPException(404)
+    update_specialty(
+        session, specialty, name, profile, qualification,
+        audit_actor=audit_actor(request),
+    )
+    session.close()
+    return RedirectResponse("/specialties", status_code=303)
 
 
 @app.get("/audit", response_class=HTMLResponse)

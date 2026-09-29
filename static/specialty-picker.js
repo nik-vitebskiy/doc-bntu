@@ -9,6 +9,7 @@ document.querySelectorAll('[data-specialty-picker]').forEach((picker) => {
   const error = picker.querySelector('.specialty-error');
   const form = value.form || picker.closest('form');
   const qualification = form?.elements.namedItem('qualification');
+  const profile = form?.elements.namedItem('profile');
 
   const setOpen = (open) => {
     picker.classList.toggle('is-open', open);
@@ -46,6 +47,7 @@ document.querySelectorAll('[data-specialty-picker]').forEach((picker) => {
   options.forEach((option) => option.addEventListener('click', () => {
     value.value = option.dataset.value;
     search.value = option.dataset.label;
+    if (profile) profile.value = option.dataset.profile || '';
     if (qualification) qualification.value = option.dataset.qualification || '';
     error.textContent = '';
     setOpen(false);
