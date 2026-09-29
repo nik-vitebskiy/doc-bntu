@@ -6,7 +6,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ..models import AdditionalAgreement, Application, Contract, Order, OrderItem
+from ..models import AdditionalAgreement, Contract, Order, OrderItem
 from .organization_service import compare_orders
 
 
@@ -85,7 +85,7 @@ def _revision(order: Order) -> OrderRevision:
 
 
 def get_order_history(session: Session, document_type: str, document_id: int) -> OrderHistory | None:
-    """Return every revision for a contract/agreement/application from one entry point."""
+    """Return contract revisions; applications intentionally have no revision history."""
     if document_type == "contract":
         contract = session.get(Contract, document_id)
         if not contract:
@@ -100,13 +100,6 @@ def get_order_history(session: Session, document_type: str, document_id: int) ->
         statement = _order_query().where(Order.contract_id == agreement.contract_id)
         title = f"История заказа по д.с. №{agreement.number}"
         back_url = f"/additional-agreements/{agreement.id}/comparison"
-    elif document_type == "application":
-        application = session.get(Application, document_id)
-        if not application:
-            return None
-        statement = _order_query().where(Order.application_id == application.id)
-        title = f"История заказа заявки №{application.number or 'без номера'}"
-        back_url = f"/applications/{application.id}"
     else:
         return None
     orders = session.scalars(statement).unique().all()
@@ -125,7 +118,7 @@ def order_table(order: Order) -> tuple[list[OrderTableRow], list[int]]:
     rows = [
         OrderTableRow(
             faculty=item.faculty.name if item.faculty else "—",
-            specialty=item.specialty,
+            specialty=item.specialty_ref.display_label,
             qualification=item.qualification,
             profile=item.profile or "",
             demand={demand.year: demand.quantity for demand in item.annual_demands},

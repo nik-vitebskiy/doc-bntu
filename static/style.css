@@ -123,7 +123,42 @@ p{
 
 .actions{
   display:flex;
+  align-items:center;
   gap:10px
+}
+
+.import-form{
+  display:flex;
+  align-items:center;
+  gap:10px
+}
+
+.import-options{
+  display:grid;
+  gap:3px;
+  max-width:270px
+}
+
+.import-create-option{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#44546c;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer
+}
+
+.import-create-option input{
+  width:auto;
+  margin:0;
+  flex:0 0 auto
+}
+
+.import-options small{
+  color:#8793a5;
+  font-size:11px;
+  line-height:1.3
 }
 
 .button,button{
@@ -313,6 +348,23 @@ p{
   overflow:auto
 }
 
+.order-table{
+  min-width:max-content;
+  table-layout:fixed
+}
+
+.order-table th:nth-child(1),.order-table td:nth-child(1){width:180px;min-width:180px}
+.order-table th:nth-child(2),.order-table td:nth-child(2){width:270px;min-width:270px}
+.order-table th:nth-child(3),.order-table td:nth-child(3),
+.order-table th:nth-child(4),.order-table td:nth-child(4){width:180px;min-width:180px}
+.order-table th:nth-child(n+5):not(:last-child),
+.order-table td:nth-child(n+5):not(:last-child){width:62px;min-width:62px;text-align:center}
+.order-table th:last-child,.order-table td:last-child{min-width:92px;white-space:nowrap}
+.order-table td input,.order-table td select{width:100%;min-width:0}
+.order-table .specialty-picker{width:100%;min-width:0}
+.order-table tfoot td{background:#f8fbff;border-top:1px solid #dce7f4}
+.order-table tfoot button{padding:7px 10px}
+
 table{
   border-collapse:collapse;
   width:100%;
@@ -470,6 +522,52 @@ dd{
 
 .contract{
   margin-bottom:16px
+}
+
+.document-group{
+  margin:18px 0
+}
+
+.document-group>h2{
+  margin:0 0 12px;
+  font-size:18px
+}
+
+.empty-documents{
+  padding:16px 18px;
+  border:1px dashed #d6deea;
+  border-radius:8px;
+  background:#fbfcfe;
+  color:#7b889a
+}
+
+.application-card{
+  margin:0 0 10px;
+  border:1px solid #e0e7f0;
+  border-radius:8px;
+  background:#fff;
+  color:#263b59
+}
+
+.application-card>summary{
+  display:grid;
+  grid-template-columns:minmax(160px,1.2fr) minmax(135px,.8fr) minmax(145px,.8fr) minmax(180px,1.4fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:13px 15px;
+  cursor:pointer;
+  list-style:none
+}
+
+.application-card>summary::-webkit-details-marker{display:none}
+.application-card[open]>summary{border-bottom:1px solid #e7ecf3;background:#f8fbff}
+.application-card-content{padding:14px}
+.application-card-content>.contract{border:0;padding:0;margin:0}
+.application-card-content>.file-block{margin-top:18px}
+
+@media(max-width:900px){
+  .application-card>summary{grid-template-columns:1fr 1fr}
+  .application-card>summary mark{justify-self:start}
 }
 
 .faculty-context-contract{

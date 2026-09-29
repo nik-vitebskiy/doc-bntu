@@ -68,7 +68,9 @@ class Contract(Base):
     documents: Mapped[list["Document"]] = relationship(back_populates="contract")
     faculty_links: Mapped[list["ContractFaculty"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
     @property
-    def items(self): return [item for order in self.orders if order.is_current for item in order.items]
+    def current_order(self): return next((order for order in self.orders if order.is_current), None)
+    @property
+    def items(self): return self.current_order.items if self.current_order else []
     @property
     def specialty_codes(self): return list(dict.fromkeys(item.specialty for item in self.items))
     @property
@@ -131,8 +133,9 @@ class Application(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organization.id", ondelete="CASCADE"))
     number: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    received_date: Mapped[date] = mapped_column(Date)
+    received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     signed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="Заявка")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
@@ -167,8 +170,24 @@ class Specialty(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(50), unique=True)
     name: Mapped[str] = mapped_column(String(255))
+    profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
     qualification: Mapped[str | None] = mapped_column(String(255), nullable=True)
     faculty: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    @property
+    def display_label(self) -> str:
+        """Return a compact label without repeating code-only catalog names."""
+        code = (self.code or "").strip()
+        name = (self.name or "").strip()
+        if not name or name.casefold() == code.casefold():
+            return code
+        return f"{code} — {name}"
+
+    @property
+    def display_name(self) -> str:
+        code = (self.code or "").strip()
+        name = (self.name or "").strip()
+        return "" if not name or name.casefold() == code.casefold() else name
 
 
 class Order(Base):
@@ -184,6 +203,7 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String(30), default="CURRENT")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by: Mapped[int | None] = mapped_column(ForeignKey("app_user.id"), nullable=True)
+    import_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     contract: Mapped[Contract | None] = relationship(back_populates="orders")
     additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="orders")
     application: Mapped[Application | None] = relationship(back_populates="orders")

@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from sqlalchemy import select
+
 from app.main import app
 from app.models import (
     Application,
@@ -9,7 +11,7 @@ from app.models import (
     DocumentAttachment,
     Faculty,
 )
-from app.services.application_service import create_application
+from app.services.application_service import create_application, save_application_item
 from app.services.document_registry_service import PAGE_SIZE, application_registry, contract_registry
 from app.services.organization_service import save_item
 from app.services.status_service import URGENCY_DUE_30, URGENCY_LATER
@@ -115,9 +117,9 @@ def test_application_registry_combines_search_faculty_status_and_scan(
         session,
         organization.id,
         ["Факультет заявок"],
-        "2026-09-23",
         "ЗАЯВКА-01",
         "2026-09-24",
+        "2027-12-31",
         user.id,
         audit_actor=actor,
     )
@@ -125,8 +127,8 @@ def test_application_registry_combines_search_faculty_status_and_scan(
         session,
         organization.id,
         ["Факультет заявок"],
-        "2026-09-22",
         "ЗАЯВКА-02",
+        "",
         "",
         user.id,
         audit_actor=actor,
@@ -154,15 +156,92 @@ def test_application_registry_combines_search_faculty_status_and_scan(
     assert response.status_code == 200
     assert target.number in response.text
     assert closed.number not in response.text
-    assert f"/applications/{target.id}" in response.text
-    assert f"/organizations/{organization.id}" in response.text
+    target_url = f"/organizations/{organization.id}?application_id={target.id}#application-{target.id}"
+    assert target_url in response.text
     assert "Есть подписанный скан" in response.text
     assert "Дата подписания" in response.text
+    assert "Действует до" in response.text
+    assert "31.12.2027" in response.text
+    assert "Дата получения" not in response.text
     assert "24.09.2026" in response.text
 
     card = client.get(f"/applications/{target.id}")
     assert card.status_code == 200
     assert 'href="/applications"' in card.text
+    assert "Действует до" in card.text
+    assert 'value="2027-12-31"' in card.text
+    assert "Получена:" not in card.text
+
+
+def test_organization_card_shows_and_expands_selected_application(
+    session, organization, user, actor, client
+):
+    first = create_application(
+        session, organization.id, ["Факультет заявок"], "ЗАЯВКА-КАРТОЧКА-1",
+        "2026-09-20", "2027-09-20", user.id, audit_actor=actor,
+    )
+    second = create_application(
+        session, organization.id, ["Другой факультет"], "ЗАЯВКА-КАРТОЧКА-2",
+        "2026-09-25", "2028-09-25", user.id, audit_actor=actor,
+    )
+    save_application_item(
+        session, second, "APP-CARD-01", "Инженер",
+        {"profile": "Профилизация заявки", "demand_2027": "4"},
+        audit_actor=actor,
+    )
+    _scan(session, organization.id, user.id, application_id=second.id)
+
+    page = client.get(
+        f"/organizations/{organization.id}", params={"application_id": second.id}
+    )
+
+    assert page.status_code == 200
+    assert "Договоры" in page.text and "Заявки" in page.text
+    assert first.number in page.text and second.number in page.text
+    assert "25.09.2026" in page.text and "25.09.2028" in page.text
+    assert "Другой факультет" in page.text
+    assert "Есть подписанный скан" in page.text
+    assert f'id="application-{second.id}" class="application-card" open' in page.text
+    assert f'id="application-{first.id}" class="application-card" open' not in page.text
+    assert "Профилизация заявки" in page.text
+    assert f'/applications/{second.id}/order-history' not in page.text
+    assert f'/applications/{second.id}/files' in page.text
+
+
+def test_organization_without_applications_has_explicit_empty_state(
+    organization, client
+):
+    page = client.get(f"/organizations/{organization.id}")
+
+    assert page.status_code == 200
+    assert "Заявки" in page.text
+    assert "Заявок нет" in page.text
+
+
+def test_application_is_created_without_received_date(session, organization, client):
+    faculty = Faculty(name="Факультет срока заявки")
+    session.add(faculty)
+    session.commit()
+
+    form = client.get(f"/organizations/{organization.id}/applications/new")
+    assert form.status_code == 200
+    assert "Дата получения" not in form.text
+    assert "Действует до" in form.text
+
+    response = client.post(
+        f"/organizations/{organization.id}/applications",
+        data={
+            "faculty": faculty.name,
+            "number": "З-СРОК",
+            "signed_date": "2026-09-29",
+            "date_end": "2027-09-29",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    application = session.scalar(select(Application).where(Application.number == "З-СРОК"))
+    assert application.received_date is None
+    assert application.date_end == date(2027, 9, 29)
 
 
 def test_applications_registry_has_one_get_route():

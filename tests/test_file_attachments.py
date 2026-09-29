@@ -77,7 +77,7 @@ def test_file_upload_endpoint_rejects_executable(session, contract, client):
 
 def test_application_and_agreement_use_the_same_upload_flow(session, organization, contract, client, actor, user):
     application = create_application(
-        session, organization.id, ["Тестовый факультет"], "2026-09-23", "APP-FILE-1", "",
+        session, organization.id, ["Тестовый факультет"], "APP-FILE-1", "", "",
         user.id, audit_actor=actor,
     )
     agreement = register_additional_agreement(

@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block content %}
+<a class="back" href="/">← К реестру</a>
+<div class="titlebar"><div><h1>Сверка с АИС</h1><p>{{ report.filename }} · проверено организаций: {{ report.organizations_checked }} · расхождений: {{ report.differences_count }}</p></div><a class="button secondary" href="/reconciliation/{{ report.token }}/export">Скачать Excel</a></div>
+{% if report.organizations_skipped %}<section class="card"><b>Пропущено чужих организаций: {{ report.organizations_skipped }}</b><p>{{ report.skipped_names[:10]|join(', ') }}{% if report.skipped_names|length > 10 %} и ещё {{ report.skipped_names|length - 10 }}{% endif %}</p></section>{% endif %}
+{% set sections = report.sections() %}{% for key, title in [('changed', 'Значения отличаются'), ('ais_only', 'Есть в АИС, нет у нас'), ('system_only', 'Есть у нас, нет в АИС')] %}
+<section class="card"><h2>{{ title }} ({{ sections[key]|length }})</h2><div class="tablewrap"><table><thead><tr><th>Организация</th><th>Факультет</th><th>Код специальности</th><th>Год</th><th>У нас</th><th>В АИС</th><th>Примечание</th></tr></thead><tbody>{% for row in sections[key] %}<tr><td>{{ row.organization }}</td><td>{{ row.faculty }}</td><td>{{ row.specialty }}</td><td>{{ row.year }}</td><td>{{ row.ours }}</td><td>{{ row.ais }}</td><td>{{ row.note }}</td></tr>{% else %}<tr><td colspan="7">Расхождений нет</td></tr>{% endfor %}</tbody></table></div></section>
+{% endfor %}{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><h1>Справочник специальностей</h1><p>Названия и значения для автоподстановки в кадровый заказ</p></div></div>
+<section class="card">
+  <form class="filters specialty-directory-search" method="get">
+    <input name="q" value="{{ q }}" placeholder="Поиск по коду или названию">
+    <button>Найти</button>
+    {% if q %}<a class="button secondary" href="/specialties">Сбросить</a>{% endif %}
+  </form>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Код</th><th>Название</th><th>Профилизация</th><th>Квалификация</th>{% if request.state.user.role == 'ADMIN' %}<th></th>{% endif %}</tr></thead>
+    <tbody>{% for specialty in registry.items %}
+      <tr>
+        <td><strong>{{ specialty.code }}</strong></td>
+        {% if request.state.user.role == 'ADMIN' %}
+          <form id="specialty-{{ specialty.id }}" method="post" action="/specialties/{{ specialty.id }}"></form>
+          <td><input form="specialty-{{ specialty.id }}" name="name" value="{{ specialty.display_name }}" placeholder="Название"></td>
+          <td><input form="specialty-{{ specialty.id }}" name="profile" value="{{ specialty.profile or '' }}" placeholder="Профилизация"></td>
+          <td><input form="specialty-{{ specialty.id }}" name="qualification" value="{{ specialty.qualification or '' }}" placeholder="Квалификация"></td>
+          <td><button form="specialty-{{ specialty.id }}" class="compact">Сохранить</button></td>
+        {% else %}
+          <td>{{ specialty.display_name }}</td><td>{{ specialty.profile or '' }}</td><td>{{ specialty.qualification or '' }}</td>
+        {% endif %}
+      </tr>
+    {% else %}<tr><td colspan="5">Специальности не найдены.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% set registry_items_genitive='специальностей' %}{% include '_registry_pagination.html' %}
+</section>
+{% endblock %}

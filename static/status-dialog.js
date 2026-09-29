@@ -12,12 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const comment = form.querySelector('[name="comment"]');
     const error = form.querySelector('.status-error');
     const refreshRequired = () => {
-      const reverseApplication = form.dataset.documentType === 'application'
-        && form.dataset.currentStatus !== 'Заявка'
-        && select.value === 'Заявка';
-      const closingRequiresComment = form.dataset.documentType !== 'contract'
+      const closingRequiresComment = form.dataset.documentType === 'additional_agreement'
         && select.value === 'Закрыт';
-      comment.required = closingRequiresComment || reverseApplication;
+      comment.required = closingRequiresComment;
     };
     select.addEventListener('change', refreshRequired);
     refreshRequired();

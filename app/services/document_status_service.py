@@ -24,27 +24,11 @@ def allowed_status_transitions(document_type: str, current_status: str, role: st
     return ()
 
 
-def _validate_comment(
-    document_type: str,
-    target_status: str,
-    current_status: str,
-    role: str,
-    comment: str,
-) -> str:
-    value = comment.strip()
-    reverse_application = current_status == STATUS_CLOSED and target_status == STATUS_APPLICATION
-    if document_type != "contract" and target_status == STATUS_CLOSED and not value:
-        raise StatusTransitionError("При закрытии документа необходимо указать комментарий.")
-    if reverse_application and role == "ADMIN" and not value:
-        raise StatusTransitionError("Для обратного перехода необходимо указать комментарий.")
-    return value
-
-
 def _change_status(session, document, document_type: str, target_status: str, role: str, comment: str):
     allowed = allowed_status_transitions(document_type, document.status, role)
     if target_status not in allowed:
         raise StatusTransitionError("Этот переход статуса недоступен.")
-    comment = _validate_comment(document_type, target_status, document.status, role, comment)
+    comment = comment.strip()
     old_status = document.status
     document.status = target_status
     current_audit_batch(session).record(

@@ -1,14 +1,21 @@
 from io import BytesIO
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 
 from openpyxl import Workbook
 from sqlalchemy import select, text
 
-from app.models import Contract
+from app.models import Contract, Organization, OrderItem, Specialty
 from app.services.organization_service import canonical_faculty_name
 from app.services.organization_service import registry
 from app.services.organization_service import create_contract, save_item, update_contract
 import pytest
-from app.services.import_service import import_xlsx
+from app.services.import_service import import_xlsx as _import_xlsx
+
+
+def import_xlsx(*args, **kwargs):
+    kwargs.setdefault("create_unknown_organizations", True)
+    return _import_xlsx(*args, **kwargs)
 
 
 def sample_workbook():
@@ -23,7 +30,7 @@ def sample_workbook():
     ])
     for index in range(60):
         sheet.append([
-            'ОАО "МТЗ"', "100316761", f"Факультет {index % 11 + 1}", "МТЗ-1",
+            'ОАО "МТЗ"', "100316761", f"Факультет {index % 11 + 1}", "№МТЗ-1 от 01.10.2020",
             "Минский тракторный завод", "Минск", "Активен",
             "01.10.2020", "31.12.2030", f"TEST-{index + 1:02d}",
             "Инженер", index + 1, index + 2,
@@ -70,7 +77,7 @@ def test_import_creates_one_shared_contract_and_repeat_is_idempotent(session, us
         "organization": 1, "contract": 1, "contract_faculty": 11,
         "order_item": 60, "annual_demand": 120,
     }
-    assert session.get(Contract, contract.id).status == "Закрыт"
+    assert session.get(Contract, contract.id).status == "Активен"
 
 
 def test_registry_splits_shared_contract_by_faculty(session, user, tmp_path):
@@ -98,7 +105,7 @@ def test_same_specialty_in_two_faculties_is_not_collapsed(session, user, tmp_pat
     sheet.append(["Организация-заказчик", "УНП", "Факультет", "Номер договора",
                   "Код специальности, направления специальности, специализации"])
     for faculty in ("Факультет А", "Факультет Б"):
-        sheet.append(["Завод", "100316761", faculty, "ОБЩ-1", "CODE-01"])
+        sheet.append(["Завод", "100316761", faculty, "№ОБЩ-1 от 01.01.2025", "CODE-01"])
     path = tmp_path / "shared.xlsx"
     workbook.save(path)
     result = import_xlsx(session, path, user.id)
@@ -108,6 +115,74 @@ def test_same_specialty_in_two_faculties_is_not_collapsed(session, user, tmp_pat
     assert {(row.faculty.name, tuple(row.specialty_codes)) for row in rows} == {
         ("Факультет А", ("CODE-01",)), ("Факультет Б", ("CODE-01",)),
     }
+
+
+def test_import_without_optional_columns_preserves_existing_values(session, user, tmp_path):
+    organization = Organization(
+        unp="100316761", short_name="Завод", full_name="Полное название",
+        legal_address="Минск", authority="Минпром", phone="123",
+    )
+    specialty = Specialty(code="CODE-OLD", name="CODE-OLD", qualification="Инженер")
+    session.add_all([organization, specialty])
+    session.flush()
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Организация-заказчик", "УНП", "Факультет", "Номер договора",
+                  "Код специальности, направления специальности, специализации"])
+    sheet.append(["Завод", "100316761", "Факультет А", "№Д-1 от 01.01.2025", "CODE-OLD"])
+    sheet.append(["Завод", "100316761", "Факультет А", "№Д-1 от 01.01.2025", "CODE-NEW"])
+    path = tmp_path / "without_optional_columns.xlsx"
+    workbook.save(path)
+
+    import_xlsx(session, path, user.id)
+
+    assert organization.full_name == "Полное название"
+    assert organization.legal_address == "Минск"
+    assert organization.authority == "Минпром"
+    assert organization.phone == "123"
+    assert specialty.qualification == "Инженер"
+    assert session.scalar(select(Specialty).where(Specialty.code == "CODE-NEW")).qualification is None
+    old_item = session.scalar(select(OrderItem).where(OrderItem.specialty_id == specialty.id))
+    assert old_item.qualification_value is None
+
+
+def test_import_without_qualification_keeps_existing_order_item_value(session, user, tmp_path):
+    path = tmp_path / "initial.xlsx"
+    path.write_bytes(sample_workbook())
+    import_xlsx(session, path, user.id)
+    item = session.scalar(select(OrderItem).join(Specialty).where(Specialty.code == "TEST-01"))
+    item.qualification_value = "Квалификация документа"
+    session.flush()
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Организация-заказчик", "УНП", "Факультет", "Номер договора",
+                  "Код специальности, направления специальности, специализации"])
+    sheet.append(['ОАО "МТЗ"', "100316761", "Факультет 1", "№МТЗ-1 от 01.10.2020", "TEST-01"])
+    workbook.save(path)
+
+    import_xlsx(session, path, user.id)
+    assert item.qualification_value == "Квалификация документа"
+
+
+def test_qualification_migration_trims_values_and_normalizes_blanks(session, monkeypatch):
+    trimmed = Specialty(code="TRIM-01", name="TRIM-01", qualification="  Инженер  ")
+    blank = Specialty(code="TRIM-02", name="TRIM-02", qualification="   ")
+    session.add_all([trimmed, blank])
+    session.flush()
+    migration_path = Path("alembic/versions/20260928_17_trim_specialty_qualifications.py")
+    spec = spec_from_file_location("trim_specialty_qualifications", migration_path)
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    monkeypatch.setattr(migration.op, "execute", lambda statement: session.execute(text(statement)))
+
+    migration.upgrade()
+    session.flush()
+    session.expire_all()
+
+    assert trimmed.qualification == "Инженер"
+    assert blank.qualification is None
 
 
 def test_cannot_remove_faculty_that_owns_order_lines(session, user):

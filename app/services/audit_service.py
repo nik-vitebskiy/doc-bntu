@@ -113,7 +113,7 @@ def _reference_label(session: Session | None, target: str, identifier: Any) -> A
     if isinstance(referenced, Application):
         return f"№{referenced.number}" if referenced.number else "Без номера"
     if isinstance(referenced, Specialty):
-        return referenced.code if referenced.name == referenced.code else f"{referenced.code} — {referenced.name}"
+        return referenced.display_label
     if isinstance(referenced, Faculty):
         return referenced.name
     if isinstance(referenced, AppUser):

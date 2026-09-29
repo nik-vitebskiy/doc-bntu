@@ -33,7 +33,7 @@ def _excel_bytes(organization="Импортируемая организация
         "Организация-заказчик", "УНП", "Факультет", "Номер договора",
         "Код специальности, направления специальности, специализации", "Квалификация", "2027",
     ])
-    sheet.append([organization, unp, "Автотракторный", "IMP-01", "7-01-01", "Инженер", 3])
+    sheet.append([organization, unp, "Автотракторный", "№IMP-01 от 01.01.2025", "7-01-01", "Инженер", 3])
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()
@@ -62,6 +62,34 @@ def test_contract_status_api_accepts_closing_without_comment(session, contract, 
         select(AuditLog).where(
             AuditLog.entity_type == "contract",
             AuditLog.entity_id == contract.id,
+            AuditLog.action == "STATUS_CHANGE",
+        )
+    ).one()
+    assert row.comment is None
+
+
+def test_agreement_status_api_accepts_closing_without_comment(session, contract, client):
+    agreement = AdditionalAgreement(
+        contract_id=contract.id,
+        number="ДС-БЕЗ-КОММЕНТАРИЯ",
+        date=date(2026, 9, 29),
+        status="Активен",
+    )
+    session.add(agreement)
+    session.commit()
+
+    response = client.post(
+        f"/additional-agreements/{agreement.id}/status",
+        data={"status": "Закрыт", "comment": ""},
+    )
+
+    assert response.status_code == 200
+    session.expire_all()
+    assert session.get(AdditionalAgreement, agreement.id).status == "Закрыт"
+    row = session.scalars(
+        select(AuditLog).where(
+            AuditLog.entity_type == "additional_agreement",
+            AuditLog.entity_id == agreement.id,
             AuditLog.action == "STATUS_CHANGE",
         )
     ).one()
@@ -234,6 +262,7 @@ def test_scan_upload_download_soft_delete_and_restore_are_audited(session, contr
 def test_excel_import_records_current_user_and_system(session, client, tmp_path):
     response = client.post(
         "/import",
+        data={"create_unknown_organizations": "true"},
         files={"file": ("web-import.xlsx", _excel_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )
     assert response.status_code == 303
@@ -265,7 +294,10 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
 
     path = tmp_path / "system-import.xlsx"
     path.write_bytes(_excel_bytes("Системный импорт", "999200002"))
-    import_xlsx(session, path, original_filename="system-import.xlsx", audit_actor=AuditActor())
+    import_xlsx(
+        session, path, original_filename="system-import.xlsx",
+        create_unknown_organizations=True, audit_actor=AuditActor(),
+    )
     system_event = session.scalars(
         select(AuditLog).where(AuditLog.entity_type == "excel_import", AuditLog.entity_label.contains("system-import"))
     ).one()

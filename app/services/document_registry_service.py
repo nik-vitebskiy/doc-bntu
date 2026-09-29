@@ -191,7 +191,7 @@ def application_registry(
             selectinload(Application.faculty_links).selectinload(ApplicationFaculty.faculty),
             selectinload(Application.documents).selectinload(Document.attachments),
         )
-        .order_by(Application.received_date.desc(), Application.id.desc())
+        .order_by(Application.signed_date.desc().nullslast(), Application.id.desc())
         .offset(offset)
         .limit(PAGE_SIZE)
     )

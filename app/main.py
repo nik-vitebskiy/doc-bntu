@@ -10,9 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from .api.router import OPENAPI_TAGS, router as api_router
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
-from .services.organization_service import compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
+from .services.reconciliation_service import load_report, reconcile_xlsx, report_xlsx
+from .services.organization_service import InactiveOrderRevisionError, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
     authenticate,
     change_password,
@@ -41,6 +42,7 @@ from .services.file_service import (
 from .services.order_history_service import compare_revisions, get_order_history, get_revision, order_table
 from .services.document_registry_service import application_registry as get_application_registry, contract_registry as get_contract_registry
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
+from .services.specialty_service import specialty_registry, update_specialty
 logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True)
@@ -111,6 +113,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "audit": ("/audit",),
         "users": ("/users",),
         "settings": ("/settings",),
+        "specialties": ("/specialties",),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -367,6 +370,42 @@ def settings_form(request: Request):
     return views.TemplateResponse(request, "settings.html", {})
 
 
+@app.get("/specialties", response_class=HTMLResponse)
+def specialties_registry(request: Request, q: str = "", page: int = 1):
+    session = db()
+    registry = specialty_registry(session, q, page)
+    pagination_query = urlencode({"q": q}) if q else ""
+    response = views.TemplateResponse(request, "specialties.html", {
+        "registry": registry,
+        "q": q,
+        "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+    })
+    session.close()
+    return response
+
+
+@app.post("/specialties/{specialty_id}")
+def save_specialty(
+    request: Request,
+    specialty_id: int,
+    name: str = Form(""),
+    profile: str = Form(""),
+    qualification: str = Form(""),
+):
+    require_admin(request)
+    session = db()
+    specialty = session.get(Specialty, specialty_id)
+    if not specialty:
+        session.close()
+        raise HTTPException(404)
+    update_specialty(
+        session, specialty, name, profile, qualification,
+        audit_actor=audit_actor(request),
+    )
+    session.close()
+    return RedirectResponse("/specialties", status_code=303)
+
+
 @app.get("/audit", response_class=HTMLResponse)
 def audit_registry(
     request: Request,
@@ -432,6 +471,7 @@ def registry(
     end_year: str = "",
     urgency: str = "",
     urgency_choice: str | None = None,
+    import_notice: str = "",
 ):
     valid_urgencies = {key for key, _label in URGENCY_BUCKETS}
     urgency = urgency if urgency in valid_urgencies else ""
@@ -459,6 +499,7 @@ def registry(
         "q": q,
         "selected_faculty": faculty,
         "selected_faculty_id": selected_faculty_id,
+        "import_notice": import_notice,
         "end_years": end_years,
         "selected_end_year": end_year,
         "urgency_buckets": URGENCY_BUCKETS,
@@ -547,9 +588,11 @@ def new_application(request: Request, org_id: int):
     return views.TemplateResponse(request, "application_form.html", {"org": org, "faculties": s.query(Faculty).order_by(Faculty.name).all()})
 
 @app.post("/organizations/{org_id}/applications")
-def add_application(request: Request, org_id: int, faculty: list[str] = Form(...), received_date: str = Form(...), number: str = Form(""), signed_date: str = Form("")):
-    s = db(); application = create_application(s, org_id, faculty, received_date, number, signed_date, request.state.user.id, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/applications/{application.id}", status_code=303)
+def add_application(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
+    s = db(); application = create_application(s, org_id, faculty, number, signed_date, date_end, request.state.user.id, audit_actor=audit_actor(request))
+    application_id = application.id
+    s.close()
+    return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.get("/applications/{application_id}", response_class=HTMLResponse)
 def application_card(request: Request, application_id: int, file_error: str = ""):
@@ -557,15 +600,19 @@ def application_card(request: Request, application_id: int, file_error: str = ""
     if not application: raise HTTPException(404)
     load_attachment_relations(application)
     years = list(range(date.today().year, date.today().year + 10))
-    response = views.TemplateResponse(request, "application.html", {"application": application, "years": years, "file_error": file_error})
+    specialties = s.query(Specialty).order_by(Specialty.code, Specialty.name).all()
+    response = views.TemplateResponse(request, "application.html", {
+        "application": application, "years": years, "specialties": specialties,
+        "all_faculties": s.query(Faculty).order_by(Faculty.name).all(), "file_error": file_error,
+    })
     s.close()
     return response
 
 @app.post("/applications/{application_id}")
-def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form("")):
+def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
-    update_application(s, application, number, signed_date, audit_actor=audit_actor(request))
+    update_application(s, application, number, signed_date, date_end, audit_actor=audit_actor(request))
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/applications/{application_id}/status")
@@ -589,7 +636,14 @@ def set_application_status(request: Request, application_id: int, status: str = 
 async def add_application_item(request: Request, application_id: int, specialty: str = Form(...), qualification: str = Form("")):
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
-    save_application_item(s, application, specialty, qualification, await request.form(), audit_actor=audit_actor(request))
+    try:
+        save_application_item(s, application, specialty, qualification, await request.form(), catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/application-items/{item_id}")
@@ -597,7 +651,14 @@ async def edit_application_item(request: Request, item_id: int, specialty: str =
     s = db(); item = s.get(OrderItem, item_id)
     if not item or not item.order.application_id: raise HTTPException(404)
     application = s.get(Application, item.order.application_id)
-    save_application_item(s, application, specialty, qualification, await request.form(), item, audit_actor=audit_actor(request))
+    try:
+        save_application_item(s, application, specialty, qualification, await request.form(), item, catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        s.close()
+        raise HTTPException(400, str(error)) from error
     return RedirectResponse(f"/applications/{application.id}", status_code=303)
 
 @app.post("/applications/{application_id}/files")
@@ -619,7 +680,10 @@ async def add_application_file(request: Request, application_id: int, file_kind:
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/import")
-async def upload_import(request: Request, file: UploadFile = File(...)):
+async def upload_import(
+    request: Request, file: UploadFile = File(...),
+    create_unknown_organizations: bool = Form(False),
+):
     if not file.filename.lower().endswith(".xlsx"): raise HTTPException(400, "Нужен файл Excel .xlsx")
     original_filename = Path(file.filename).name
     handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -631,32 +695,84 @@ async def upload_import(request: Request, file: UploadFile = File(...)):
         handle.close()
     s = db()
     try:
-        result = import_xlsx(s, path, request.state.user.id, original_filename, audit_actor=audit_actor(request))
+        result = import_xlsx(
+            s, path, request.state.user.id, original_filename,
+            create_unknown_organizations=create_unknown_organizations,
+            audit_actor=audit_actor(request),
+        )
         logger.info(result.log_line("веб"))
     except Exception:
         raise
     finally:
         s.close()
         path.unlink(missing_ok=True)
-    return RedirectResponse("/", status_code=303)
+    notice = result.skipped_notice()
+    return RedirectResponse(f"/?{urlencode({'import_notice': notice})}" if notice else "/", status_code=303)
+
+@app.post("/reconciliation", response_class=HTMLResponse)
+async def reconcile_with_ais(request: Request, file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(400, "Нужен файл Excel .xlsx")
+    original_filename = Path(file.filename).name
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    path = Path(handle.name)
+    try:
+        while chunk := await file.read(1024 * 1024):
+            handle.write(chunk)
+    finally:
+        handle.close()
+    s = db()
+    try:
+        report = reconcile_xlsx(s, path, original_filename, audit_actor=audit_actor(request))
+        return views.TemplateResponse(request, "reconciliation.html", {"report": report})
+    finally:
+        s.close()
+        path.unlink(missing_ok=True)
+
+@app.get("/reconciliation/{token}/export")
+def export_reconciliation(token: str):
+    try:
+        report = load_report(token)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        raise HTTPException(404, "Отчёт сверки не найден.")
+    headers = {"Content-Disposition": f'attachment; filename="ais-reconciliation-{token[:8]}.xlsx"'}
+    return StreamingResponse(
+        report_xlsx(report),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 @app.get("/organizations/new", response_class=HTMLResponse)
 def new_org(request: Request): return views.TemplateResponse(request, "organization_form.html", {})
 
 @app.post("/organizations/new")
-def create_org(request: Request, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form("")):
-    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{org.id}", status_code=303)
+def create_org(request: Request, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
+    org_id = org.id
+    s.close()
+    return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.post("/organizations/{org_id}")
 def edit_organization(request: Request, org_id: int, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
     update_organization(s, org, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{org.id}", status_code=303)
+    s.close()
+    return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.get("/organizations/{org_id}", response_class=HTMLResponse)
-def organization(request: Request, org_id: int, faculty_id: int | None = None, file_error: str = ""):
+def organization(
+    request: Request,
+    org_id: int,
+    faculty_id: int | None = None,
+    application_id: int | None = None,
+    file_error: str = "",
+    contract_date_error: str = "",
+    contract_date_error_field: str = "",
+    contract_start_date: str = "",
+    contract_end_date: str = "",
+    contract_number: str = "",
+):
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
     context_faculty = s.get(Faculty, faculty_id) if faculty_id is not None else None
@@ -665,19 +781,61 @@ def organization(request: Request, org_id: int, faculty_id: int | None = None, f
         load_attachment_relations(contract)
         for agreement in contract.agreements:
             load_attachment_relations(agreement)
-    years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
-    response = views.TemplateResponse(request, "organization.html", {"org": org, "contracts": contracts, "context_faculty": context_faculty, "years": years, "all_faculties": s.query(Faculty).order_by(Faculty.name).all(), "file_error": file_error})
+    applications = sorted(
+        org.applications,
+        key=lambda item: (item.signed_date or date.min, item.id),
+        reverse=True,
+    )
+    for application in applications:
+        load_attachment_relations(application)
+    focused_application_id = (
+        application_id if any(item.id == application_id for item in applications) else None
+    )
+    document_years = {
+        int(year)
+        for document in [*org.contracts, *org.applications]
+        for item in document.items
+        for year in json.loads(item.demand_json).keys()
+    }
+    years = sorted(document_years | set(range(date.today().year, date.today().year + 10)))
+    response = views.TemplateResponse(request, "organization.html", {
+        "org": org,
+        "contracts": contracts,
+        "applications": applications,
+        "focused_application_id": focused_application_id,
+        "context_faculty": context_faculty,
+        "years": years,
+        "all_faculties": s.query(Faculty).order_by(Faculty.name).all(),
+        "specialties": s.query(Specialty).order_by(Specialty.code, Specialty.name).all(),
+        "file_error": file_error,
+        "contract_date_error": contract_date_error,
+        "contract_date_error_field": contract_date_error_field,
+        "contract_start_date": contract_start_date,
+        "contract_end_date": contract_end_date,
+        "contract_number": contract_number,
+    })
     s.close()
     return response
 
 @app.post("/organizations/{org_id}/contract")
-def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), end_date: str = Form("")):
+def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), start_date: str = Form(""), end_date: str = Form("")):
     s = db()
     try:
-        create_contract(s, org_id, faculty, number, end_date, audit_actor=audit_actor(request))
+        create_contract(s, org_id, faculty, number, end_date, start_date=start_date, audit_actor=audit_actor(request))
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
+        message = str(error)
+        if "дат" in message.lower():
+            error_field = "start_date" if message.lower().startswith("укажите") and "начала" in message.lower() else "end_date"
+            query = urlencode({
+                "contract_date_error": message,
+                "contract_date_error_field": error_field,
+                "contract_start_date": start_date,
+                "contract_end_date": end_date,
+                "contract_number": number,
+            })
+            return RedirectResponse(f"/organizations/{org_id}?{query}", status_code=303)
+        raise HTTPException(400, message) from error
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
@@ -788,10 +946,6 @@ def agreement_order_history(request: Request, agreement_id: int, revision_id: in
     return render_order_history(request, "additional_agreement", agreement_id, revision_id, compare_to)
 
 
-@app.get("/applications/{application_id}/order-history", response_class=HTMLResponse)
-def application_order_history(request: Request, application_id: int, revision_id: int | None = None, compare_to: int | None = None):
-    return render_order_history(request, "application", application_id, revision_id, compare_to)
-
 @app.post("/contracts/{contract_id}/items")
 async def add_item(contract_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
     s = db(); c = s.get(Contract, contract_id)
@@ -799,7 +953,10 @@ async def add_item(contract_id: int, request: Request, specialty: str = Form(...
     form = await request.form()
     organization_id = c.organization_id
     try:
-        save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, audit_actor=audit_actor(request))
+        save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -813,7 +970,10 @@ async def edit_item(item_id: int, request: Request, specialty: str = Form(...), 
     form = await request.form()
     organization_id = item.contract.organization_id
     try:
-        save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, audit_actor=audit_actor(request))
+        save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
         raise HTTPException(400, str(error)) from error
@@ -824,7 +984,11 @@ async def edit_item(item_id: int, request: Request, specialty: str = Form(...), 
 def remove_item(request: Request, item_id: int):
     s = db(); item = s.get(OrderItem, item_id)
     if not item: raise HTTPException(404)
-    destination = delete_item(s, item, audit_actor=audit_actor(request))
+    try:
+        destination = delete_item(s, item, audit_actor=audit_actor(request))
+    except InactiveOrderRevisionError as error:
+        s.close()
+        raise HTTPException(409, str(error)) from error
     if destination["application_id"]:
         return RedirectResponse(f"/applications/{destination['application_id']}", status_code=303)
     return RedirectResponse(f"/organizations/{destination['organization_id']}", status_code=303)
