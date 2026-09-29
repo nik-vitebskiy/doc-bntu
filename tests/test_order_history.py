@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlalchemy import select
 
-from app.models import Order
+from app.models import Order, OrderItem, Specialty
 from app.services.application_service import create_application
 from app.services.order_history_service import compare_revisions, get_order_history, get_revision, order_table
 from app.services.organization_service import register_additional_agreement, save_item
@@ -69,7 +69,7 @@ def test_contract_chain_has_three_order_revisions_in_history(session, contract, 
     assert [revision.number for revision in agreement_history.revisions] == [3, 2, 1]
 
 
-def test_imported_or_initial_order_is_shown_as_single_source_revision(session, organization, user, actor):
+def test_application_is_not_exposed_as_revision_history(session, organization, user, actor):
     application = create_application(
         session,
         organization.id,
@@ -81,12 +81,7 @@ def test_imported_or_initial_order_is_shown_as_single_source_revision(session, o
         audit_actor=actor,
     )
 
-    history = get_order_history(session, "application", application.id)
-    assert history is not None
-    assert len(history.revisions) == 1
-    assert history.revisions[0].number == 1
-    assert history.revisions[0].is_current is True
-    assert history.revisions[0].origin_label.startswith("Заявка №З-01")
+    assert get_order_history(session, "application", application.id) is None
 
 
 def test_order_history_page_is_read_only_and_supports_comparison_and_audit_link(
@@ -163,7 +158,19 @@ def test_document_cards_have_one_order_history_entry(session, contract, organiza
     )
     application_page = client.get(f"/applications/{application.id}")
     assert application_page.status_code == 200
-    assert application_page.text.count("История заказа") == 1
+    assert "История заказа" not in application_page.text
+    assert client.get(f"/applications/{application.id}/order-history").status_code == 404
+
+    specialty = Specialty(code="APP-EDITABLE", name="Редактируемая специальность")
+    session.add(specialty)
+    session.commit()
+    response = client.post(
+        f"/applications/{application.id}/items",
+        data={"specialty": specialty.code, "profile": "Ручная правка", "qualification": "Инженер"},
+    )
+    assert response.status_code == 303
+    saved = session.scalar(select(OrderItem).where(OrderItem.specialty_id == specialty.id))
+    assert saved.profile == "Ручная правка"
 
 
 def test_revision_from_another_document_cannot_be_opened(session, contract, organization, user, actor, client):

@@ -204,7 +204,7 @@ def test_organization_card_shows_and_expands_selected_application(
     assert f'id="application-{second.id}" class="application-card" open' in page.text
     assert f'id="application-{first.id}" class="application-card" open' not in page.text
     assert "Профилизация заявки" in page.text
-    assert f'/applications/{second.id}/order-history' in page.text
+    assert f'/applications/{second.id}/order-history' not in page.text
     assert f'/applications/{second.id}/files' in page.text
 
 

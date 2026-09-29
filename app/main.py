@@ -946,10 +946,6 @@ def agreement_order_history(request: Request, agreement_id: int, revision_id: in
     return render_order_history(request, "additional_agreement", agreement_id, revision_id, compare_to)
 
 
-@app.get("/applications/{application_id}/order-history", response_class=HTMLResponse)
-def application_order_history(request: Request, application_id: int, revision_id: int | None = None, compare_to: int | None = None):
-    return render_order_history(request, "application", application_id, revision_id, compare_to)
-
 @app.post("/contracts/{contract_id}/items")
 async def add_item(contract_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
     s = db(); c = s.get(Contract, contract_id)
