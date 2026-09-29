@@ -1,0 +1,19 @@
+<section class="contract application-order">
+  <div class="order-toolbar">
+    <h2>Заказ на подготовку кадров</h2>
+    <a class="button secondary compact" href="/applications/{{ application.id }}/order-history">История заказа</a>
+  </div>
+  <form id="new-application-item-{{ application.id }}" method="post" action="/applications/{{ application.id }}/items"></form>
+  <div class="tablewrap">
+    <table class="order-table">
+      <thead><tr><th>Факультет</th><th>Специальность</th><th>Профилизация</th><th>Квалификация</th>{% for year in years %}<th>{{ year }}</th>{% endfor %}<th></th></tr></thead>
+      <tbody>
+      {% for item in application.items %}{% set demand = item.demand_json|fromjson %}
+        <tr data-order-item-row><form id="application-item-{{ item.id }}" method="post" action="/application-items/{{ item.id }}"><td><select form="application-item-{{ item.id }}" name="faculty_id"><option value="">Не указан</option>{% for faculty in all_faculties %}<option value="{{ faculty.id }}" {{ 'selected' if faculty.id == item.faculty_id }}>{{ faculty.name }}</option>{% endfor %}</select></td><td>{% with picker_form_id='application-item-' ~ item.id, selected_specialty=item.specialty_ref %}{% include '_specialty_picker.html' %}{% endwith %}</td><td><input form="application-item-{{ item.id }}" name="profile" value="{{ item.profile or '' }}"></td><td><input form="application-item-{{ item.id }}" name="qualification" value="{{ item.qualification }}"></td>{% for year in years %}<td><input form="application-item-{{ item.id }}" class="quantity" name="demand_{{ year }}" value="{{ demand.get(year|string, 0) }}"></td>{% endfor %}<td><button form="application-item-{{ item.id }}" title="Сохранить">✓</button><button form="application-item-{{ item.id }}" formaction="/items/{{ item.id }}/delete" title="Удалить" onclick="return confirm('Удалить строку заказа?')">×</button></td></form></tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr class="order-add-row"><td><select form="new-application-item-{{ application.id }}" name="faculty_id"><option value="">Факультет не указан</option>{% for faculty in all_faculties %}<option value="{{ faculty.id }}">{{ faculty.name }}</option>{% endfor %}</select></td><td>{% with picker_form_id='new-application-item-' ~ application.id, selected_specialty=None %}{% include '_specialty_picker.html' %}{% endwith %}</td><td><input form="new-application-item-{{ application.id }}" name="profile" placeholder="Профилизация"></td><td><input form="new-application-item-{{ application.id }}" name="qualification" placeholder="Квалификация"></td>{% for year in years %}<td><input form="new-application-item-{{ application.id }}" class="quantity" name="demand_{{ year }}" value="0" aria-label="Потребность {{ year }}"></td>{% endfor %}<td><button form="new-application-item-{{ application.id }}">Добавить</button></td></tr></tfoot>
+    </table>
+  </div>
+</section>
+{% with attachments=application.attachments, upload_url='/applications/' ~ application.id ~ '/files' %}{% include '_file_block.html' %}{% endwith %}

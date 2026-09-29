@@ -20,9 +20,9 @@
       <thead><tr><th>Номер заявки</th><th>Организация</th><th>Действует до</th><th>Дата подписания</th><th>Факультеты</th><th>Статус</th><th>Скан</th></tr></thead>
       <tbody>
       {% for application in registry.rows %}
-        <tr class="clickable-row" onclick="location='/applications/{{ application.id }}'">
+        <tr class="clickable-row" onclick="location='/organizations/{{ application.organization_id }}?application_id={{ application.id }}#application-{{ application.id }}'">
           <td><b>{{ application.number or 'Не присвоен' }}</b></td>
-          <td><a href="/organizations/{{ application.organization_id }}" onclick="event.stopPropagation()"><b>{{ application.organization.name }}</b></a></td>
+          <td><a href="/organizations/{{ application.organization_id }}?application_id={{ application.id }}#application-{{ application.id }}" onclick="event.stopPropagation()"><b>{{ application.organization.name }}</b></a></td>
           <td>{{ application.date_end.strftime('%d.%m.%Y') if application.date_end else 'Не указана' }}</td>
           <td>{{ application.signed_date.strftime('%d.%m.%Y') if application.signed_date else 'Не подписана' }}</td>
           <td>{{ application.faculty_names|join(', ') or '—' }}</td>

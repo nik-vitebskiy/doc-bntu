@@ -727,6 +727,7 @@ def organization(
     request: Request,
     org_id: int,
     faculty_id: int | None = None,
+    application_id: int | None = None,
     file_error: str = "",
     contract_date_error: str = "",
     contract_date_error_field: str = "",
@@ -742,10 +743,28 @@ def organization(
         load_attachment_relations(contract)
         for agreement in contract.agreements:
             load_attachment_relations(agreement)
-    years = sorted({year for c in org.contracts for i in c.items for year in json.loads(i.demand_json).keys()})
+    applications = sorted(
+        org.applications,
+        key=lambda item: (item.signed_date or date.min, item.id),
+        reverse=True,
+    )
+    for application in applications:
+        load_attachment_relations(application)
+    focused_application_id = (
+        application_id if any(item.id == application_id for item in applications) else None
+    )
+    document_years = {
+        int(year)
+        for document in [*org.contracts, *org.applications]
+        for item in document.items
+        for year in json.loads(item.demand_json).keys()
+    }
+    years = sorted(document_years | set(range(date.today().year, date.today().year + 10)))
     response = views.TemplateResponse(request, "organization.html", {
         "org": org,
         "contracts": contracts,
+        "applications": applications,
+        "focused_application_id": focused_application_id,
         "context_faculty": context_faculty,
         "years": years,
         "all_faculties": s.query(Faculty).order_by(Faculty.name).all(),

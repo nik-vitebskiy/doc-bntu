@@ -524,6 +524,52 @@ dd{
   margin-bottom:16px
 }
 
+.document-group{
+  margin:18px 0
+}
+
+.document-group>h2{
+  margin:0 0 12px;
+  font-size:18px
+}
+
+.empty-documents{
+  padding:16px 18px;
+  border:1px dashed #d6deea;
+  border-radius:8px;
+  background:#fbfcfe;
+  color:#7b889a
+}
+
+.application-card{
+  margin:0 0 10px;
+  border:1px solid #e0e7f0;
+  border-radius:8px;
+  background:#fff;
+  color:#263b59
+}
+
+.application-card>summary{
+  display:grid;
+  grid-template-columns:minmax(160px,1.2fr) minmax(135px,.8fr) minmax(145px,.8fr) minmax(180px,1.4fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:13px 15px;
+  cursor:pointer;
+  list-style:none
+}
+
+.application-card>summary::-webkit-details-marker{display:none}
+.application-card[open]>summary{border-bottom:1px solid #e7ecf3;background:#f8fbff}
+.application-card-content{padding:14px}
+.application-card-content>.contract{border:0;padding:0;margin:0}
+.application-card-content>.file-block{margin-top:18px}
+
+@media(max-width:900px){
+  .application-card>summary{grid-template-columns:1fr 1fr}
+  .application-card>summary mark{justify-self:start}
+}
+
 .faculty-context-contract{
   background:#f8fbff;
   border-color:#b9d4f7;
