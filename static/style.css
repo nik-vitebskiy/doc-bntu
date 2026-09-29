@@ -103,6 +103,7 @@ main{
 .statistics-card span{color:#718096;font-size:13px}.statistics-card strong{font-size:28px;color:#17243b}.statistics-card small{color:#8793a5}
 .statistics-card small a{color:#1263d6;text-decoration:none}.statistics-attention strong{color:#d66a2b}
 @media(max-width:1000px){.statistics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.error-page{max-width:720px;margin:30px auto;display:grid;gap:16px}.error-summary{padding:12px 14px;border:1px solid #e3a3a3;border-radius:7px;background:#fff1f1;color:#8f2929}.error-summary ul{margin:7px 0 0;padding-left:20px}.field-error{display:block;color:#b02d2d;font-size:11px;margin-top:4px}
 
 h1{
   font-size:24px;

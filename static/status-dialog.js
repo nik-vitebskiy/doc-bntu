@@ -12,9 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const comment = form.querySelector('[name="comment"]');
     const error = form.querySelector('.status-error');
     const refreshRequired = () => {
-      const closingRequiresComment = form.dataset.documentType === 'additional_agreement'
-        && select.value === 'Закрыт';
-      comment.required = closingRequiresComment;
+      comment.required = false;
     };
     select.addEventListener('change', refreshRequired);
     refreshRequired();
@@ -25,7 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch(form.action, { method: 'POST', body: new FormData(form) });
       const data = await response.json();
       if (!response.ok) {
-        error.textContent = data.error || 'Не удалось изменить статус.';
+        error.textContent = data.detail || data.error || 'Не удалось изменить статус.';
         return;
       }
       document.querySelectorAll(`mark[data-status-key="${form.dataset.statusKey}"]`).forEach((badge) => {

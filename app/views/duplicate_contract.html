@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block content %}
+<section class="card error-page"><h1>Возможный дубликат договора</h1><p>У организации {{ org.name }} уже есть договор с номером {{ duplicate.number }}. Проверьте данные или продолжите сохранение осознанно.</p>
+<form method="post" action="{{ action }}">{% for name in faculty %}<input type="hidden" name="faculty" value="{{ name }}">{% endfor %}<input type="hidden" name="number" value="{{ number }}"><input type="hidden" name="start_date" value="{{ start_date }}"><input type="hidden" name="end_date" value="{{ end_date }}"><input type="hidden" name="allow_duplicate" value="true"><button class="button">Всё равно сохранить</button> <button class="button secondary" type="button" onclick="history.back()">Назад</button></form></section>
+{% endblock %}

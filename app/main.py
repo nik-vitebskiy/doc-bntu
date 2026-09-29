@@ -3,12 +3,14 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+from sqlalchemy import func
 from .api.router import OPENAPI_TAGS, router as api_router
 from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
@@ -44,6 +46,16 @@ from .services.document_registry_service import application_registry as get_appl
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .services.specialty_service import specialty_registry, update_specialty
 from .services.statistics_service import registry_statistics
+from .services.form_validation import (
+    AgreementForm,
+    ApplicationForm,
+    ContractForm,
+    FormValidationError,
+    OrganizationForm,
+    UserCreateForm,
+    validate_form,
+    validate_order_form,
+)
 logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True)
@@ -63,6 +75,34 @@ app.include_router(api_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 views = Jinja2Templates(directory="app/views")
 views.env.filters["fromjson"] = json.loads
+
+
+def _validation_response(request: Request, errors: dict[str, str]):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "; ".join(errors.values())}, status_code=422)
+    return views.TemplateResponse(request, "validation_error.html", {"errors": errors}, status_code=422)
+
+
+@app.exception_handler(FormValidationError)
+async def form_validation_error(request: Request, error: FormValidationError):
+    return _validation_response(request, error.errors)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(request: Request, error: RequestValidationError):
+    errors = {}
+    for item in error.errors():
+        field = str(item.get("loc", ("form",))[-1])
+        errors[field] = "Обязательное поле не заполнено." if item.get("type") == "missing" else "Некорректное значение поля."
+    return _validation_response(request, errors)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, error: Exception):
+    logger.exception("Unhandled request error on %s", request.url.path, exc_info=error)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "Произошла ошибка. Обратитесь к администратору."}, status_code=500)
+    return views.TemplateResponse(request, "server_error.html", {}, status_code=500)
 
 
 views.env.filters["document_status"] = status_label
@@ -230,11 +270,12 @@ def setup_form(request: Request):
 @app.post("/setup", response_class=HTMLResponse)
 def setup(
     request: Request,
-    full_name: str = Form(...),
-    username: str = Form(...),
-    password: str = Form(...),
-    password_repeat: str = Form(...),
+    full_name: str = Form(""),
+    username: str = Form(""),
+    password: str = Form(""),
+    password_repeat: str = Form(""),
 ):
+    validate_form(UserCreateForm, username=username, initial_password=password)
     session = db()
     if has_users(session):
         session.close()
@@ -247,7 +288,7 @@ def setup(
         session.close()
         return views.TemplateResponse(request, "setup.html", {
             "error": str(error), "full_name": full_name, "username": username,
-        }, status_code=400)
+        }, status_code=422)
     session.close()
     return RedirectResponse("/login", status_code=303)
 
@@ -279,7 +320,7 @@ def save_password(
         session.close()
         return views.TemplateResponse(request, "change_password.html", {
             "error": str(error), "forced": forced,
-        }, status_code=400)
+        }, status_code=422)
     session.close()
     return RedirectResponse("/", status_code=303)
 
@@ -308,13 +349,14 @@ def new_user_form(request: Request):
 @app.post("/users/new", response_class=HTMLResponse)
 def add_user(
     request: Request,
-    full_name: str = Form(...),
-    username: str = Form(...),
-    role: str = Form(...),
-    initial_password: str = Form(...),
-    password_repeat: str = Form(...),
+    full_name: str = Form(""),
+    username: str = Form(""),
+    role: str = Form(""),
+    initial_password: str = Form(""),
+    password_repeat: str = Form(""),
 ):
     require_admin(request)
+    validate_form(UserCreateForm, username=username, initial_password=initial_password)
     session = db()
     try:
         if initial_password != password_repeat:
@@ -328,7 +370,7 @@ def add_user(
         return views.TemplateResponse(request, "user_form.html", {
             "edited_user": None, "error": str(error), "full_name": full_name,
             "username": username, "selected_role": role,
-        }, status_code=400)
+        }, status_code=422)
     session.close()
     return RedirectResponse("/users", status_code=303)
 
@@ -360,7 +402,7 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
         response = views.TemplateResponse(request, "user_form.html", {
             "edited_user": user, "error": str(error), "full_name": full_name,
             "selected_role": role,
-        }, status_code=400)
+        }, status_code=422)
         session.close()
         return response
     session.close()
@@ -594,7 +636,10 @@ def new_application(request: Request, org_id: int):
     return views.TemplateResponse(request, "application_form.html", {"org": org, "faculties": s.query(Faculty).order_by(Faculty.name).all()})
 
 @app.post("/organizations/{org_id}/applications")
-def add_application(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
+def add_application(request: Request, org_id: int, faculty: list[str] = Form(default=[]), number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
+    validate_form(ApplicationForm, number=number, signed_date=signed_date, date_end=date_end)
+    if not faculty:
+        raise FormValidationError({"faculty": "Выберите хотя бы один факультет."})
     s = db(); application = create_application(s, org_id, faculty, number, signed_date, date_end, request.state.user.id, audit_actor=audit_actor(request))
     application_id = application.id
     s.close()
@@ -605,7 +650,7 @@ def application_card(request: Request, application_id: int, file_error: str = ""
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
     load_attachment_relations(application)
-    years = list(range(date.today().year, date.today().year + 10))
+    years = list(range(2026, 2037))
     specialties = s.query(Specialty).order_by(Specialty.code, Specialty.name).all()
     response = views.TemplateResponse(request, "application.html", {
         "application": application, "years": years, "specialties": specialties,
@@ -616,6 +661,7 @@ def application_card(request: Request, application_id: int, file_error: str = ""
 
 @app.post("/applications/{application_id}")
 def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
+    validate_form(ApplicationForm, number=number, signed_date=signed_date, date_end=date_end)
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
     update_application(s, application, number, signed_date, date_end, audit_actor=audit_actor(request))
@@ -629,7 +675,7 @@ def set_application_status(request: Request, application_id: int, status: str = 
         change_application_status(s, application, status, request.state.user.role, comment, audit_actor=audit_actor(request))
     except StatusTransitionError as error:
         s.close()
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return JSONResponse({"detail": str(error)}, status_code=400)
     result = {
         "status": application.status,
         "status_class": status_class(application.status),
@@ -639,33 +685,44 @@ def set_application_status(request: Request, application_id: int, status: str = 
     return result
 
 @app.post("/applications/{application_id}/items")
-async def add_application_item(request: Request, application_id: int, specialty: str = Form(...), qualification: str = Form("")):
+async def add_application_item(request: Request, application_id: int, specialty: str = Form(""), qualification: str = Form("")):
+    form = await request.form()
+    validate_order_form(form, specialty)
     s = db(); application = s.get(Application, application_id)
-    if not application: raise HTTPException(404)
+    if not application:
+        s.close()
+        raise HTTPException(404)
     try:
-        save_application_item(s, application, specialty, qualification, await request.form(), catalog_only=True, audit_actor=audit_actor(request))
+        save_application_item(s, application, specialty, qualification, form, catalog_only=True, audit_actor=audit_actor(request))
     except InactiveOrderRevisionError as error:
         s.close()
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
+        raise FormValidationError({"order_item": str(error)}) from error
+    s.close()
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/application-items/{item_id}")
-async def edit_application_item(request: Request, item_id: int, specialty: str = Form(...), qualification: str = Form("")):
+async def edit_application_item(request: Request, item_id: int, specialty: str = Form(""), qualification: str = Form("")):
+    form = await request.form()
+    validate_order_form(form, specialty)
     s = db(); item = s.get(OrderItem, item_id)
-    if not item or not item.order.application_id: raise HTTPException(404)
+    if not item or not item.order.application_id:
+        s.close()
+        raise HTTPException(404)
     application = s.get(Application, item.order.application_id)
     try:
-        save_application_item(s, application, specialty, qualification, await request.form(), item, catalog_only=True, audit_actor=audit_actor(request))
+        save_application_item(s, application, specialty, qualification, form, item, catalog_only=True, audit_actor=audit_actor(request))
     except InactiveOrderRevisionError as error:
         s.close()
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
-    return RedirectResponse(f"/applications/{application.id}", status_code=303)
+        raise FormValidationError({"order_item": str(error)}) from error
+    application_id = application.id
+    s.close()
+    return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/applications/{application_id}/files")
 async def add_application_file(request: Request, application_id: int, file_kind: str = Form(...), file: UploadFile = File(...)):
@@ -752,17 +809,19 @@ def export_reconciliation(token: str):
 def new_org(request: Request): return views.TemplateResponse(request, "organization_form.html", {})
 
 @app.post("/organizations/new")
-def create_org(request: Request, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
-    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
+def create_org(request: Request, name: str = Form(""), unp: str = Form(""), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+    validate_form(OrganizationForm, name=name, unp=unp)
+    s = db(); org = create_organization(s, name=name, unp=unp, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
     org_id = org.id
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.post("/organizations/{org_id}")
-def edit_organization(request: Request, org_id: int, name: str = Form(...), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+def edit_organization(request: Request, org_id: int, name: str = Form(""), unp: str = Form(""), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+    validate_form(OrganizationForm, name=name, unp=unp)
     s = db(); org = s.get(Organization, org_id)
     if not org: raise HTTPException(404)
-    update_organization(s, org, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
+    update_organization(s, org, name=name, unp=unp, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
@@ -803,7 +862,7 @@ def organization(
         for item in document.items
         for year in json.loads(item.demand_json).keys()
     }
-    years = sorted(document_years | set(range(date.today().year, date.today().year + 10)))
+    years = sorted(document_years | set(range(2026, 2037)))
     response = views.TemplateResponse(request, "organization.html", {
         "org": org,
         "contracts": contracts,
@@ -824,37 +883,49 @@ def organization(
     return response
 
 @app.post("/organizations/{org_id}/contract")
-def add_contract(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), start_date: str = Form(""), end_date: str = Form("")):
+def add_contract(request: Request, org_id: int, faculty: list[str] = Form(default=[]), number: str = Form(""), start_date: str = Form(""), end_date: str = Form(""), allow_duplicate: bool = Form(False)):
+    validate_form(ContractForm, number=number, start_date=start_date, end_date=end_date)
+    if not faculty:
+        raise FormValidationError({"faculty": "Выберите хотя бы один факультет."})
     s = db()
+    duplicate = s.query(Contract).filter(Contract.organization_id == org_id, func.lower(Contract.number) == number.strip().lower()).first()
+    if duplicate and not allow_duplicate:
+        org = s.get(Organization, org_id)
+        response = views.TemplateResponse(request, "duplicate_contract.html", {
+            "org": org, "duplicate": duplicate, "action": f"/organizations/{org_id}/contract",
+            "faculty": faculty, "number": number, "start_date": start_date, "end_date": end_date,
+        })
+        s.close()
+        return response
     try:
         create_contract(s, org_id, faculty, number, end_date, start_date=start_date, audit_actor=audit_actor(request))
     except ValueError as error:
         s.close()
-        message = str(error)
-        if "дат" in message.lower():
-            error_field = "start_date" if message.lower().startswith("укажите") and "начала" in message.lower() else "end_date"
-            query = urlencode({
-                "contract_date_error": message,
-                "contract_date_error_field": error_field,
-                "contract_start_date": start_date,
-                "contract_end_date": end_date,
-                "contract_number": number,
-            })
-            return RedirectResponse(f"/organizations/{org_id}?{query}", status_code=303)
-        raise HTTPException(400, message) from error
+        raise FormValidationError({"contract": str(error)}) from error
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)
 
 @app.post("/contracts/{contract_id}")
-def edit_contract(request: Request, contract_id: int, faculty: list[str] = Form(...), number: str = Form(...), start_date: str = Form(...), end_date: str = Form("")):
+def edit_contract(request: Request, contract_id: int, faculty: list[str] = Form(default=[]), number: str = Form(""), start_date: str = Form(""), end_date: str = Form(""), allow_duplicate: bool = Form(False)):
+    validate_form(ContractForm, number=number, start_date=start_date, end_date=end_date)
+    if not faculty:
+        raise FormValidationError({"faculty": "Выберите хотя бы один факультет."})
     s = db(); contract = s.get(Contract, contract_id)
     if not contract: raise HTTPException(404)
     organization_id = contract.organization_id
+    duplicate = s.query(Contract).filter(Contract.organization_id == organization_id, Contract.id != contract_id, func.lower(Contract.number) == number.strip().lower()).first()
+    if duplicate and not allow_duplicate:
+        response = views.TemplateResponse(request, "duplicate_contract.html", {
+            "org": contract.organization, "duplicate": duplicate, "action": f"/contracts/{contract_id}",
+            "faculty": faculty, "number": number, "start_date": start_date, "end_date": end_date,
+        })
+        s.close()
+        return response
     try:
         update_contract(s, contract, number, start_date, end_date, faculty, audit_actor=audit_actor(request))
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
+        raise FormValidationError({"contract": str(error)}) from error
     s.close()
     return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 
@@ -866,7 +937,7 @@ def set_contract_status(request: Request, contract_id: int, status: str = Form(.
         change_contract_status(s, contract, status, request.state.user.role, comment, audit_actor=audit_actor(request))
     except StatusTransitionError as error:
         s.close()
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return JSONResponse({"detail": str(error)}, status_code=400)
     result = {
         "status": contract.status,
         "status_class": status_class(contract.status),
@@ -876,11 +947,16 @@ def set_contract_status(request: Request, contract_id: int, status: str = Form(.
     return result
 
 @app.post("/contracts/{contract_id}/additional-agreements")
-def add_additional_agreement(request: Request, contract_id: int, number: str = Form(...), agreement_date: str = Form(...)):
+def add_additional_agreement(request: Request, contract_id: int, number: str = Form(""), agreement_date: str = Form("")):
+    validate_form(AgreementForm, number=number, agreement_date=agreement_date)
     s = db(); contract = s.get(Contract, contract_id)
-    if not contract: raise HTTPException(404)
-    agreement = register_additional_agreement(s, contract, number, date.fromisoformat(agreement_date), request.state.user.id, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/organizations/{contract.organization_id}", status_code=303)
+    if not contract:
+        s.close()
+        raise HTTPException(404)
+    register_additional_agreement(s, contract, number, date.fromisoformat(agreement_date), request.state.user.id, audit_actor=audit_actor(request))
+    organization_id = contract.organization_id
+    s.close()
+    return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 
 @app.post("/additional-agreements/{agreement_id}/status")
 def set_agreement_status(request: Request, agreement_id: int, status: str = Form(...), comment: str = Form("")):
@@ -890,7 +966,7 @@ def set_agreement_status(request: Request, agreement_id: int, status: str = Form
         change_agreement_status(s, agreement, status, request.state.user.role, comment, audit_actor=audit_actor(request))
     except StatusTransitionError as error:
         s.close()
-        return JSONResponse({"error": str(error)}, status_code=400)
+        return JSONResponse({"detail": str(error)}, status_code=400)
     result = {
         "status": agreement.status,
         "status_class": status_class(agreement.status),
@@ -953,10 +1029,13 @@ def agreement_order_history(request: Request, agreement_id: int, revision_id: in
 
 
 @app.post("/contracts/{contract_id}/items")
-async def add_item(contract_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
-    s = db(); c = s.get(Contract, contract_id)
-    if not c: raise HTTPException(404)
+async def add_item(contract_id: int, request: Request, specialty: str = Form(""), qualification: str = Form("")):
     form = await request.form()
+    validate_order_form(form, specialty)
+    s = db(); c = s.get(Contract, contract_id)
+    if not c:
+        s.close()
+        raise HTTPException(404)
     organization_id = c.organization_id
     try:
         save_item(s, contract_id, specialty, qualification, form, user_id=request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
@@ -965,15 +1044,18 @@ async def add_item(contract_id: int, request: Request, specialty: str = Form(...
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
+        raise FormValidationError({"order_item": str(error)}) from error
     s.close()
     return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 
 @app.post("/items/{item_id}")
-async def edit_item(item_id: int, request: Request, specialty: str = Form(...), qualification: str = Form("")):
-    s = db(); item = s.get(OrderItem, item_id)
-    if not item: raise HTTPException(404)
+async def edit_item(item_id: int, request: Request, specialty: str = Form(""), qualification: str = Form("")):
     form = await request.form()
+    validate_order_form(form, specialty)
+    s = db(); item = s.get(OrderItem, item_id)
+    if not item:
+        s.close()
+        raise HTTPException(404)
     organization_id = item.contract.organization_id
     try:
         save_item(s, item.contract_id, specialty, qualification, form, item, request.state.user.id, catalog_only=True, audit_actor=audit_actor(request))
@@ -982,7 +1064,7 @@ async def edit_item(item_id: int, request: Request, specialty: str = Form(...), 
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
         s.close()
-        raise HTTPException(400, str(error)) from error
+        raise FormValidationError({"order_item": str(error)}) from error
     s.close()
     return RedirectResponse(f"/organizations/{organization_id}", status_code=303)
 

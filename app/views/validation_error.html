@@ -1,0 +1,7 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Проверьте данные</title><link rel="stylesheet" href="/static/style.css"></head><body><main class="content">
+<section class="card error-page validation-error-page">
+  <h1>Проверьте данные формы</h1>
+  <div class="error-summary" role="alert"><b>Форма не сохранена:</b><ul>{% for field, message in errors.items() %}<li data-field="{{ field }}">{{ message }}</li>{% endfor %}</ul></div>
+  <button class="button secondary" type="button" onclick="history.back()">← Назад к форме</button>
+</section>
+</main></body></html>
