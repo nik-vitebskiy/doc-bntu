@@ -68,6 +68,34 @@ def test_contract_status_api_accepts_closing_without_comment(session, contract, 
     assert row.comment is None
 
 
+def test_agreement_status_api_accepts_closing_without_comment(session, contract, client):
+    agreement = AdditionalAgreement(
+        contract_id=contract.id,
+        number="ДС-БЕЗ-КОММЕНТАРИЯ",
+        date=date(2026, 9, 29),
+        status="Активен",
+    )
+    session.add(agreement)
+    session.commit()
+
+    response = client.post(
+        f"/additional-agreements/{agreement.id}/status",
+        data={"status": "Закрыт", "comment": ""},
+    )
+
+    assert response.status_code == 200
+    session.expire_all()
+    assert session.get(AdditionalAgreement, agreement.id).status == "Закрыт"
+    row = session.scalars(
+        select(AuditLog).where(
+            AuditLog.entity_type == "additional_agreement",
+            AuditLog.entity_id == agreement.id,
+            AuditLog.action == "STATUS_CHANGE",
+        )
+    ).one()
+    assert row.comment is None
+
+
 def test_agreement_activation_creates_grouped_copy_and_chain(session, contract, user, actor):
     item = save_item(
         session,
