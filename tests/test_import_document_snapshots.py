@@ -138,16 +138,27 @@ def test_closed_imported_documents_are_historical_and_read_only(session, user, a
         delete_item(session, orders[0].items[0], audit_actor=actor)
 
 
-def test_imported_current_order_rejects_mutations_but_can_be_copied(session, user, actor, tmp_path):
-    path = tmp_path / "readonly.xlsx"
+def test_imported_current_order_is_editable_and_repeat_import_overwrites_changes(session, user, actor, tmp_path):
+    path = tmp_path / "editable.xlsx"
     write_workbook(path, [["Завод", "100000004", "Автотракторный", "№A-3 от 1.1.2024", "Активен", "S-1", "Инженер", 1]])
     import_xlsx(session, path, user.id)
     contract = session.scalar(select(Contract).where(Contract.number == "A-3"))
-    with pytest.raises(InactiveOrderRevisionError, match="только для чтения"):
-        save_item(session, contract.id, "S-1", "Изменено", {}, item=contract.items[0], user_id=user.id, audit_actor=actor)
-    agreement = register_additional_agreement(session, contract, "2", date(2025, 1, 1), user.id, audit_actor=actor)
-    copied = session.scalar(select(Order).where(Order.additional_agreement_id == agreement.id))
-    assert copied.import_key is None and copied.is_current and len(copied.items) == 1
+    source_item = contract.items[0]
+    form_data = {"faculty_id": str(source_item.faculty_id), "demand_2027": "7"}
+    save_item(session, contract.id, "S-1", "Изменено", form_data, item=source_item, user_id=user.id, audit_actor=actor)
+    added = save_item(session, contract.id, "S-2", "Ручная", form_data, user_id=user.id, audit_actor=actor)
+    assert added.order.import_key and added.order.is_current
+    assert source_item.qualification == "Изменено"
+    delete_item(session, source_item, audit_actor=actor)
+    session.flush()
+    assert {item.specialty for item in contract.items} == {"S-2"}
+
+    import_xlsx(session, path, user.id)
+    session.expire_all()
+    contract = session.scalar(select(Contract).where(Contract.number == "A-3"))
+    assert [item.specialty for item in contract.items] == ["S-1"]
+    assert contract.items[0].qualification == "Инженер"
+    assert {row.year: row.quantity for row in contract.items[0].annual_demands} == {2027: 1}
 
 
 def test_mtz_migration_redirects_old_contract_and_order(session):

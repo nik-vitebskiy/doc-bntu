@@ -160,6 +160,8 @@ def _document_status(group: DocumentGroup) -> str:
 
 
 def _sync_order(session, order: Order, desired: dict[tuple[int, int], ImportLine], qualification_present: bool):
+    # Customer decision: imported current orders are editable, but a repeated
+    # import is authoritative and deliberately overwrites their manual changes.
     existing = {(item.faculty_id, item.specialty_id): item for item in order.items}
     created = 0
     for key, line in desired.items():
