@@ -49,6 +49,10 @@ def save_application_item(session, application, specialty, qualification, form_d
         ensure_current_order(item.order)
     else:
         item = OrderItem(order_id=order.id, specialty_id=specialty_ref.id)
+    faculty_id = str(form_data.get("faculty_id", "")).strip()
+    item.faculty_id = int(faculty_id) if faculty_id.isdigit() else None
+    if item.faculty_id and not session.get(ApplicationFaculty, (application.id, item.faculty_id)):
+        session.add(ApplicationFaculty(application_id=application.id, faculty_id=item.faculty_id))
     item.specialty_id = specialty_ref.id
     item.qualification_value = qualification.strip() or None
     for year, quantity in values.items():

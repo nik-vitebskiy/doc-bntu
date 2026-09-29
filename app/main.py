@@ -560,7 +560,10 @@ def application_card(request: Request, application_id: int, file_error: str = ""
     load_attachment_relations(application)
     years = list(range(date.today().year, date.today().year + 10))
     specialties = s.query(Specialty).order_by(Specialty.code, Specialty.name).all()
-    response = views.TemplateResponse(request, "application.html", {"application": application, "years": years, "specialties": specialties, "file_error": file_error})
+    response = views.TemplateResponse(request, "application.html", {
+        "application": application, "years": years, "specialties": specialties,
+        "all_faculties": s.query(Faculty).order_by(Faculty.name).all(), "file_error": file_error,
+    })
     s.close()
     return response
 

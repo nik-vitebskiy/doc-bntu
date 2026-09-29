@@ -11,7 +11,10 @@ import re
 from openpyxl import load_workbook
 from sqlalchemy import func
 
-from ..models import AdditionalAgreement, AnnualDemand, Contract, ContractFaculty, Order, OrderItem, Organization
+from ..models import (
+    AdditionalAgreement, AnnualDemand, Application, ApplicationFaculty, Contract,
+    ContractFaculty, Order, OrderItem, Organization,
+)
 from .audit_service import AuditAction, audited, current_audit_batch
 from .organization_service import get_or_create_faculty, get_or_create_specialty
 
@@ -46,13 +49,15 @@ class ImportResult:
     contracts_created: int
     faculty_links_created: int
     order_items_created: int
+    applications: int = 0
+    applications_created: int = 0
 
     def log_line(self, source: str) -> str:
         return (
-            f"Импорт {source}: загружено {self.contracts} договоров, "
+            f"Импорт {source}: загружено {self.contracts} договоров, {self.applications} заявок, "
             f"{self.organizations} организаций, {self.faculties} факультетов, "
             f"{self.specialties} специальностей из {self.rows_processed} строк; "
-            f"новых: {self.contracts_created} договоров, {self.organizations_created} организаций, "
+            f"новых: {self.contracts_created} договоров, {self.applications_created} заявок, "
             f"{self.faculty_links_created} связей с факультетами, {self.order_items_created} строк заказа"
         )
 
@@ -66,7 +71,7 @@ class ParsedRow:
 
 @dataclass(frozen=True)
 class ImportLine:
-    faculty_id: int
+    faculty_id: int | None
     specialty_id: int
     qualification: str | None
     demands: dict[int, int]
@@ -185,16 +190,149 @@ def _sync_order(session, order: Order, desired: dict[tuple[int, int], ImportLine
     return created
 
 
+def _application_organization_name(raw_value) -> str:
+    return re.sub(r"^\s*заявка\s+", "", text(raw_value), flags=re.IGNORECASE).strip()
+
+
+def _import_applications(session, rows, index, field, has_field, years, user_id, display_name) -> ImportResult:
+    """Synchronize application exports; blank faculty is valid and remains NULL."""
+    required = {
+        "Организация-заказчик", "Номер договора",
+        "Код специальности, направления специальности, специализации",
+    }
+    missing = sorted(required - index.keys())
+    if missing:
+        raise ValueError(f"В Excel отсутствуют столбцы: {', '.join(missing)}")
+
+    seen_organizations, seen_applications, seen_faculties, seen_specialties = set(), set(), set(), set()
+    organizations_created = applications_created = faculty_links_created = order_items_created = 0
+    groups: dict[int, dict[tuple[int | None, int], ImportLine]] = {}
+    row_counts: dict[int, int] = {}
+
+    for row_number, row in rows:
+        raw_name = text(field(row, "Организация-заказчик"))
+        if not raw_name:
+            continue
+        name = _application_organization_name(raw_name)
+        organization, unp = _find_organization(session, text(field(row, "УНП")), name)
+        if organization is None:
+            organization = Organization(
+                unp=unp, short_name=name, full_name=text(field(row, "Полное наименование")) or name,
+                legal_address=text(field(row, "Адрес юридический")) or None,
+                authority=text(field(row, "Ведомство")) or None, phone=text(field(row, "Телефоны")) or None,
+            )
+            session.add(organization)
+            session.flush()
+            organizations_created += 1
+        else:
+            organization.short_name = name
+            if has_field("Полное наименование"):
+                organization.full_name = text(field(row, "Полное наименование")) or name
+            if has_field("Адрес юридический"):
+                organization.legal_address = text(field(row, "Адрес юридический")) or None
+            if has_field("Ведомство"):
+                organization.authority = text(field(row, "Ведомство")) or None
+            if has_field("Телефоны"):
+                organization.phone = text(field(row, "Телефоны")) or None
+        seen_organizations.add(organization.id)
+
+        number = text(field(row, "Номер договора"))
+        application = session.query(Application).filter_by(
+            organization_id=organization.id, number=number or None,
+        ).first()
+        if application is None:
+            application = Application(
+                organization_id=organization.id, number=number or None,
+                signed_date=parse_date(field(row, "Дата начала договора")),
+                date_end=parse_date(field(row, "Дата окончания договора")),
+                status="Заявка", created_by=user_id,
+            )
+            session.add(application)
+            session.flush()
+            applications_created += 1
+        else:
+            if has_field("Дата начала договора"):
+                application.signed_date = parse_date(field(row, "Дата начала договора"))
+            if has_field("Дата окончания договора"):
+                application.date_end = parse_date(field(row, "Дата окончания договора"))
+            application.status = "Заявка"
+        seen_applications.add(application.id)
+        row_counts[application.id] = row_counts.get(application.id, 0) + 1
+
+        faculty = None
+        faculty_name = text(field(row, "Факультет"))
+        if faculty_name:
+            faculty = get_or_create_faculty(session, faculty_name)
+            seen_faculties.add(faculty.name)
+            if not session.get(ApplicationFaculty, (application.id, faculty.id)):
+                session.add(ApplicationFaculty(application_id=application.id, faculty_id=faculty.id))
+                session.flush()
+                faculty_links_created += 1
+        else:
+            code = text(field(row, "Код специальности, направления специальности, специализации"))
+            logger.warning(
+                "В строке %s заявки не указан факультет: организация=%r, номер=%r, код=%r",
+                row_number, name, number, code,
+            )
+
+        specialty_code = text(field(row, "Код специальности, направления специальности, специализации"))
+        if not specialty_code:
+            continue
+        qualification = text(field(row, "Квалификация")) if has_field("Квалификация") else ""
+        specialty = get_or_create_specialty(session, specialty_code, qualification, faculty.name if faculty else "")
+        seen_specialties.add(specialty.code)
+        demands = {}
+        for year, column in years:
+            try:
+                demands[year] = int(row[column] or 0)
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"Строка {row_number}, год {year}: неверная потребность.") from error
+        groups.setdefault(application.id, {})[(faculty.id if faculty else None, specialty.id)] = ImportLine(
+            faculty.id if faculty else None, specialty.id, qualification or None, demands,
+        )
+
+    for application_id, desired in groups.items():
+        application = session.get(Application, application_id)
+        import_key = f"application:{application.id}"
+        order = session.query(Order).filter_by(import_key=import_key).first()
+        if order is None:
+            order = application.current_order
+            if order is None:
+                order = Order(
+                    organization_id=application.organization_id, application_id=application.id,
+                    created_by=user_id, is_current=True, status="CURRENT",
+                )
+                session.add(order)
+                session.flush()
+            order.import_key = import_key
+        order.is_current = True
+        order.status = "CURRENT"
+        order_items_created += _sync_order(session, order, desired, has_field("Квалификация"))
+
+    result = ImportResult(
+        sum(row_counts.values()), len(seen_organizations), 0, len(seen_faculties), len(seen_specialties),
+        organizations_created, 0, faculty_links_created, order_items_created,
+        applications=len(seen_applications), applications_created=applications_created,
+    )
+    current_audit_batch(session).record_values(
+        AuditAction.FILE_UPLOAD, "excel_import", None, f"Импорт Excel {display_name}",
+        new={
+            "filename": display_name, "rows_processed": result.rows_processed,
+            "organizations": result.organizations, "applications_created": result.applications_created,
+            "order_items_created": result.order_items_created,
+            "faculty_links_created": result.faculty_links_created,
+        },
+    )
+    return result
+
+
 @audited
 def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> ImportResult:
     """Synchronize import-owned snapshots without touching manual revisions."""
     worksheet = load_workbook(path, data_only=True, read_only=True).active
     headers = [text(cell.value) for cell in worksheet[1]]
     index = {header: i for i, header in enumerate(headers)}
-    required = {"Организация-заказчик", "Факультет", "Номер договора", "Код специальности, направления специальности, специализации"}
-    missing = sorted(required - index.keys())
-    if missing:
-        raise ValueError(f"В Excel отсутствуют столбцы: {', '.join(missing)}")
+    raw_rows = list(enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2))
 
     def field(row, label):
         return row[index[label]] if label in index else None
@@ -204,8 +342,18 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
         return label in index
 
     years = [(int(header), i) for i, header in enumerate(headers) if header.isdigit() and 2000 <= int(header) <= 2100]
+    statuses = [text(field(row, "Статус")) for _number, row in raw_rows if text(field(row, "Организация-заказчик"))]
+    display_name = original_filename or path.name
+    if statuses and all(status.casefold() == "заявка" for status in statuses):
+        return _import_applications(session, raw_rows, index, field, has_field, years, user_id, display_name)
+
+    required = {"Организация-заказчик", "Факультет", "Номер договора", "Код специальности, направления специальности, специализации"}
+    missing = sorted(required - index.keys())
+    if missing:
+        raise ValueError(f"В Excel отсутствуют столбцы: {', '.join(missing)}")
+
     parsed_rows = []
-    for row_number, row in enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2):
+    for row_number, row in raw_rows:
         if not text(field(row, "Организация-заказчик")):
             continue
         raw_number = field(row, "Номер договора")
@@ -358,7 +506,6 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
             latest_active.order.status = "CURRENT"
 
     session.flush()
-    display_name = original_filename or path.name
     result = ImportResult(
         len(parsed_rows), len(seen_organizations), len(seen_contracts), len(seen_faculties), len(seen_specialties),
         organizations_created, contracts_created, faculty_links_created, order_items_created,
