@@ -43,6 +43,7 @@ from .services.order_history_service import compare_revisions, get_order_history
 from .services.document_registry_service import application_registry as get_application_registry, contract_registry as get_contract_registry
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .services.specialty_service import specialty_registry, update_specialty
+from .services.statistics_service import registry_statistics
 logger = logging.getLogger("uvicorn.error")
 
 Path("data").mkdir(exist_ok=True)
@@ -128,6 +129,7 @@ def urgency_class(end):
     value = expiry_urgency(end)
     return value.css_class if value else "neutral"
 views.env.globals["urgency"] = urgency_class
+views.env.globals["today"] = date.today
 
 def show_docs_enabled() -> bool:
     return os.getenv("SHOW_DOCS", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -491,6 +493,7 @@ def registry(
     selected_faculty_id = None
     if faculty:
         selected_faculty_id = s.query(Faculty.id).filter(Faculty.name == faculty).scalar()
+    statistics = registry_statistics(s, selected_faculty_id)
     response = views.TemplateResponse(request, "registry.html", {
         "contracts": contracts,
         "faculties": faculties,
@@ -505,6 +508,7 @@ def registry(
         "urgency_buckets": URGENCY_BUCKETS,
         "urgency_counts": urgency_counts,
         "selected_urgency": urgency,
+        "statistics": statistics,
     })
     s.close()
     return response
@@ -561,13 +565,14 @@ def contracts_registry(
 
 
 @app.get("/applications", response_class=HTMLResponse)
-def applications(request: Request, q: str = "", faculty: str = "", status: str = "", page: int = 1):
+def applications(request: Request, q: str = "", faculty: str = "", status: str = "", urgency: str = "", page: int = 1):
+    urgency = "due_30" if urgency == "due_30" else ""
     session = db()
     registry, faculties = get_application_registry(
-        session, query_text=q, faculty=faculty, status=status, page=page,
+        session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=page,
     )
     pagination_query = urlencode({key: value for key, value in {
-        "q": q, "faculty": faculty, "status": status,
+        "q": q, "faculty": faculty, "status": status, "urgency": urgency,
     }.items() if value})
     response = views.TemplateResponse(request, "applications.html", {
         "registry": registry,
@@ -576,6 +581,7 @@ def applications(request: Request, q: str = "", faculty: str = "", status: str =
         "q": q,
         "selected_faculty": faculty,
         "selected_status": status,
+        "selected_urgency": urgency,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
     })
     session.close()

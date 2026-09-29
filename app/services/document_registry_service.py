@@ -161,6 +161,7 @@ def application_registry(
     query_text: str = "",
     faculty: str = "",
     status: str = "",
+    urgency: str = "",
     page: int = 1,
 ):
     conditions = []
@@ -179,6 +180,8 @@ def application_registry(
         )))
     if status in APPLICATION_STATUSES:
         conditions.append(Application.status == status)
+    if urgency == URGENCY_DUE_30:
+        conditions.append(Application.date_end <= date.today() + timedelta(days=30))
 
     total = session.scalar(select(func.count(Application.id)).join(Organization).where(*conditions)) or 0
     page, pages, offset = _page(total, page)

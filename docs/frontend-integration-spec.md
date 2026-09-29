@@ -1430,18 +1430,9 @@ JSON-контракт для React — **уточним**; до его фикс�
 
 #### `GET /api/statistics`
 
-Доступ: обе роли. Ответ содержит четыре показателя по организациям:
-
-- `total` — всего уникальных организаций;
-- `with_contracts` — организации, у которых есть хотя бы один договор;
-- `with_applications` — организации, у которых есть хотя бы одна заявка;
-- `with_contracts_and_applications` — организации, у которых есть документы
-  обоих типов.
-
-Организация считается один раз по своему `id`, даже если у неё несколько
-договоров, заявок или факультетов. Необязательный `faculty_id` ограничивает
-все четыре показателя организациями, документы которых относятся к выбранному
-факультету.
+Доступ: обе роли. Организация и документ считаются один раз по своему `id`,
+даже если связаны с несколькими факультетами. Необязательный `faculty_id`
+ограничивает все показатели документами выбранного факультета.
 
 Статистика по всему отделу:
 
@@ -1453,11 +1444,16 @@ GET /api/statistics
 {
   "faculty": null,
   "organizations": {
-    "total": 14,
+    "total": 24,
+    "created_last_30_days": 3,
     "with_contracts": 11,
     "with_applications": 5,
-    "with_contracts_and_applications": 2
-  }
+    "with_applications_last_30_days": 2
+  },
+  "contracts": {"active": 38, "total": 51},
+  "applications": {"active": 12, "total": 16},
+  "active_documents": {"total": 50},
+  "attention": {"total": 6, "contracts": 4, "applications": 2}
 }
 ```
 
@@ -1475,10 +1471,15 @@ GET /api/statistics?faculty_id=1
   },
   "organizations": {
     "total": 3,
+    "created_last_30_days": 1,
     "with_contracts": 2,
     "with_applications": 2,
-    "with_contracts_and_applications": 1
-  }
+    "with_applications_last_30_days": 1
+  },
+  "contracts": {"active": 2, "total": 2},
+  "applications": {"active": 1, "total": 2},
+  "active_documents": {"total": 3},
+  "attention": {"total": 1, "contracts": 1, "applications": 0}
 }
 ```
 

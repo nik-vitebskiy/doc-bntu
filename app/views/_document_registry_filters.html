@@ -14,6 +14,8 @@
       {% for year in end_years %}<option value="{{ year|int }}" {{ 'selected' if selected_end_year == year|string }}>{{ year|int }}</option>{% endfor %}
     </select>
     <input type="hidden" name="urgency" value="{{ selected_urgency }}">
+  {% elif registry_kind == 'applications' %}
+    <label class="urgency-toggle urgency-due_30{{ ' active' if selected_urgency == 'due_30' }}"><input type="checkbox" name="urgency" value="due_30" {{ 'checked' if selected_urgency == 'due_30' }}> ≤ 30 дней</label>
   {% endif %}
   <button>Фильтровать</button>
   {% if registry_kind == 'contracts' %}

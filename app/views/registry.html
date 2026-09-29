@@ -16,4 +16,13 @@
 </tr>
 {% endfor %}
 </tbody></table></div></div></section>
+<section class="statistics-grid" aria-label="Статистика реестра">
+  <article class="statistics-card"><span>Всего организаций</span><strong>{{ statistics.total_organizations }}</strong><small>+{{ statistics.organizations_month }} за 30 дней</small></article>
+  <article class="statistics-card"><span>Активные договоры</span><strong>{{ statistics.active_contracts }}</strong><small>из {{ statistics.total_contracts }}</small></article>
+  <article class="statistics-card"><span>Организации с договорами</span><strong>{{ statistics.organizations_with_contracts }}</strong></article>
+  <article class="statistics-card"><span>Организации с заявками</span><strong>{{ statistics.organizations_with_applications }}</strong><small>+{{ statistics.organizations_with_applications_month }} за 30 дней</small></article>
+  <article class="statistics-card"><span>Активные заявки</span><strong>{{ statistics.active_applications }}</strong><small>из {{ statistics.total_applications }}</small></article>
+  <article class="statistics-card"><span>Всего активных договоров + заявок</span><strong>{{ statistics.total_active_documents }}</strong></article>
+  <article class="statistics-card statistics-attention"><span>Требуют внимания</span><strong>{{ statistics.attention_total }}</strong><small><a href="/contracts?{% if selected_faculty %}faculty={{ selected_faculty|urlencode }}&{% endif %}status=Активен&urgency=due_30">Договоры: {{ statistics.attention_contracts }}</a> · <a href="/applications?{% if selected_faculty %}faculty={{ selected_faculty|urlencode }}&{% endif %}status=Заявка&urgency=due_30">Заявки: {{ statistics.attention_applications }}</a></small></article>
+</section>
 {% endblock %}
