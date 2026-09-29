@@ -88,6 +88,7 @@ class ImportLine:
     faculty_id: int | None
     specialty_id: int
     qualification: str | None
+    profile: str | None
     demands: dict[int, int]
 
 
@@ -178,7 +179,13 @@ def _document_status(group: DocumentGroup) -> str:
     return "Закрыт" if counts["Закрыт"] >= counts["Активен"] else "Активен"
 
 
-def _sync_order(session, order: Order, desired: dict[tuple[int, int], ImportLine], qualification_present: bool):
+def _sync_order(
+    session,
+    order: Order,
+    desired: dict[tuple[int, int], ImportLine],
+    qualification_present: bool,
+    profile_present: bool,
+):
     # Customer decision: imported current orders are editable, but a repeated
     # import is authoritative and deliberately overwrites their manual changes.
     existing = {(item.faculty_id, item.specialty_id): item for item in order.items}
@@ -191,6 +198,11 @@ def _sync_order(session, order: Order, desired: dict[tuple[int, int], ImportLine
             created += 1
         if qualification_present:
             item.qualification_value = line.qualification
+        # Optional export columns are authoritative only when present. Thus a
+        # future "Профилизация" column overwrites manual values, while today's
+        # files without that column preserve them on repeated import.
+        if profile_present:
+            item.profile = line.profile
         demands = {row.year: row for row in item.annual_demands}
         for year, quantity in line.demands.items():
             demand = demands.get(year)
@@ -310,8 +322,9 @@ def _import_applications(
                 demands[year] = int(row[column] or 0)
             except (ValueError, TypeError) as error:
                 raise ValueError(f"Строка {row_number}, год {year}: неверная потребность.") from error
+        profile = text(field(row, "Профилизация")) if has_field("Профилизация") else ""
         groups.setdefault(application.id, {})[(faculty.id if faculty else None, specialty.id)] = ImportLine(
-            faculty.id if faculty else None, specialty.id, qualification or None, demands,
+            faculty.id if faculty else None, specialty.id, qualification or None, profile or None, demands,
         )
 
     for application_id, desired in groups.items():
@@ -330,7 +343,9 @@ def _import_applications(
             order.import_key = import_key
         order.is_current = True
         order.status = "CURRENT"
-        order_items_created += _sync_order(session, order, desired, has_field("Квалификация"))
+        order_items_created += _sync_order(
+            session, order, desired, has_field("Квалификация"), has_field("Профилизация")
+        )
 
     result = ImportResult(
         sum(row_counts.values()) + skipped_rows, len(seen_organizations), 0, len(seen_faculties), len(seen_specialties),
@@ -487,7 +502,10 @@ def import_xlsx(
                 demands[year] = int(row[column] or 0)
             except (ValueError, TypeError) as error:
                 raise ValueError(f"Строка {parsed.row_number}, год {year}: неверная потребность.") from error
-        group.rows.append((parsed, ImportLine(faculty.id, specialty.id, qualification or None, demands)))
+        profile = text(field(row, "Профилизация")) if has_field("Профилизация") else ""
+        group.rows.append((parsed, ImportLine(
+            faculty.id, specialty.id, qualification or None, profile or None, demands,
+        )))
 
     by_contract: dict[int, list[DocumentGroup]] = {}
     for group in groups.values():
@@ -535,7 +553,13 @@ def import_xlsx(
                 desired = own_values
             group.order.revision = revision
             group.order.previous_order_id = previous_order.id if previous_order else None
-            order_items_created += _sync_order(session, group.order, desired, has_field("Квалификация"))
+            order_items_created += _sync_order(
+                session,
+                group.order,
+                desired,
+                has_field("Квалификация"),
+                has_field("Профилизация"),
+            )
             previous_order = group.order
 
         if not direct_group and any(group.agreement and group.status == "Активен" for group in ordered) and not manual_current:

@@ -54,6 +54,7 @@ def save_application_item(session, application, specialty, qualification, form_d
     if item.faculty_id and not session.get(ApplicationFaculty, (application.id, item.faculty_id)):
         session.add(ApplicationFaculty(application_id=application.id, faculty_id=item.faculty_id))
     item.specialty_id = specialty_ref.id
+    item.profile = str(form_data.get("profile", "")).strip() or None
     item.qualification_value = qualification.strip() or None
     for year, quantity in values.items():
         demand = next((row for row in item.annual_demands if row.year == year), None)

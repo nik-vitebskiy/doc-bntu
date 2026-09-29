@@ -62,7 +62,7 @@ FIELD_LABELS = {
     "is_current": "Действующая редакция",
     "qualification": "Квалификация",
     "qualification_value": "Квалификация",
-    "profile": "Профиль",
+    "profile": "Профилизация",
     "year": "Год",
     "quantity": "Потребность",
     "code": "Код",

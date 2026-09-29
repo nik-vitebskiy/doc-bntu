@@ -279,6 +279,7 @@ def save_item(session, contract_id, specialty, qualification, form_data, item=No
         item = OrderItem(order_id=current_order.id, specialty_id=specialty_ref.id)
     item.specialty_id = specialty_ref.id
     item.faculty_id = faculty_id
+    item.profile = str(form_data.get("profile", "")).strip() or None
     item.qualification_value = qualification.strip() or None
     for year, quantity in values.items():
         demand = next((row for row in item.annual_demands if row.year == year), None)

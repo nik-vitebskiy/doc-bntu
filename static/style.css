@@ -348,6 +348,23 @@ p{
   overflow:auto
 }
 
+.order-table{
+  min-width:max-content;
+  table-layout:fixed
+}
+
+.order-table th:nth-child(1),.order-table td:nth-child(1){width:180px;min-width:180px}
+.order-table th:nth-child(2),.order-table td:nth-child(2){width:270px;min-width:270px}
+.order-table th:nth-child(3),.order-table td:nth-child(3),
+.order-table th:nth-child(4),.order-table td:nth-child(4){width:180px;min-width:180px}
+.order-table th:nth-child(n+5):not(:last-child),
+.order-table td:nth-child(n+5):not(:last-child){width:62px;min-width:62px;text-align:center}
+.order-table th:last-child,.order-table td:last-child{min-width:92px;white-space:nowrap}
+.order-table td input,.order-table td select{width:100%;min-width:0}
+.order-table .specialty-picker{width:100%;min-width:0}
+.order-table tfoot td{background:#f8fbff;border-top:1px solid #dce7f4}
+.order-table tfoot button{padding:7px 10px}
+
 table{
   border-collapse:collapse;
   width:100%;
