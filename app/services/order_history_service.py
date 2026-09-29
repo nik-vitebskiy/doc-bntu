@@ -125,7 +125,7 @@ def order_table(order: Order) -> tuple[list[OrderTableRow], list[int]]:
     rows = [
         OrderTableRow(
             faculty=item.faculty.name if item.faculty else "—",
-            specialty=item.specialty,
+            specialty=item.specialty_ref.display_label,
             qualification=item.qualification,
             profile=item.profile or "",
             demand={demand.year: demand.quantity for demand in item.annual_demands},

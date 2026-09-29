@@ -173,6 +173,21 @@ class Specialty(Base):
     qualification: Mapped[str | None] = mapped_column(String(255), nullable=True)
     faculty: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    @property
+    def display_label(self) -> str:
+        """Return a compact label without repeating code-only catalog names."""
+        code = (self.code or "").strip()
+        name = (self.name or "").strip()
+        if not name or name.casefold() == code.casefold():
+            return code
+        return f"{code} — {name}"
+
+    @property
+    def display_name(self) -> str:
+        code = (self.code or "").strip()
+        name = (self.name or "").strip()
+        return "" if not name or name.casefold() == code.casefold() else name
+
 
 class Order(Base):
     __tablename__ = "orders"
