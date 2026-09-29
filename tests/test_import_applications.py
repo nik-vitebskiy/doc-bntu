@@ -2,7 +2,12 @@ from openpyxl import Workbook
 from sqlalchemy import func, select
 
 from app.models import Application, Order, OrderItem, Organization
-from app.services.import_service import import_xlsx
+from app.services.import_service import import_xlsx as _import_xlsx
+
+
+def import_xlsx(*args, **kwargs):
+    kwargs.setdefault("create_unknown_organizations", True)
+    return _import_xlsx(*args, **kwargs)
 
 
 def application_workbook(tmp_path):

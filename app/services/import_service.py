@@ -51,6 +51,9 @@ class ImportResult:
     order_items_created: int
     applications: int = 0
     applications_created: int = 0
+    skipped_rows: int = 0
+    skipped_organizations: int = 0
+    skipped_names: tuple[str, ...] = ()
 
     def log_line(self, source: str) -> str:
         return (
@@ -59,6 +62,17 @@ class ImportResult:
             f"{self.specialties} специальностей из {self.rows_processed} строк; "
             f"новых: {self.contracts_created} договоров, {self.applications_created} заявок, "
             f"{self.faculty_links_created} связей с факультетами, {self.order_items_created} строк заказа"
+        )
+
+    def skipped_notice(self) -> str:
+        if not self.skipped_rows:
+            return ""
+        shown = list(self.skipped_names[:10])
+        tail = f" и ещё {self.skipped_organizations - 10}" if self.skipped_organizations > 10 else ""
+        return (
+            f"Пропущено: {self.skipped_rows} строк ({self.skipped_organizations} организаций): "
+            f"{', '.join(shown)}{tail}. Создайте карточки вручную и повторите загрузку или включите "
+            f"галочку «создавать новые»."
         )
 
 
@@ -194,7 +208,10 @@ def _application_organization_name(raw_value) -> str:
     return re.sub(r"^\s*заявка\s+", "", text(raw_value), flags=re.IGNORECASE).strip()
 
 
-def _import_applications(session, rows, index, field, has_field, years, user_id, display_name) -> ImportResult:
+def _import_applications(
+    session, rows, index, field, has_field, years, user_id, display_name,
+    create_unknown_organizations: bool,
+) -> ImportResult:
     """Synchronize application exports; blank faculty is valid and remains NULL."""
     required = {
         "Организация-заказчик", "Номер договора",
@@ -206,6 +223,8 @@ def _import_applications(session, rows, index, field, has_field, years, user_id,
 
     seen_organizations, seen_applications, seen_faculties, seen_specialties = set(), set(), set(), set()
     organizations_created = applications_created = faculty_links_created = order_items_created = 0
+    skipped_rows = 0
+    skipped_names = set()
     groups: dict[int, dict[tuple[int | None, int], ImportLine]] = {}
     row_counts: dict[int, int] = {}
 
@@ -216,6 +235,10 @@ def _import_applications(session, rows, index, field, has_field, years, user_id,
         name = _application_organization_name(raw_name)
         organization, unp = _find_organization(session, text(field(row, "УНП")), name)
         if organization is None:
+            if not create_unknown_organizations:
+                skipped_rows += 1
+                skipped_names.add(name)
+                continue
             organization = Organization(
                 unp=unp, short_name=name, full_name=text(field(row, "Полное наименование")) or name,
                 legal_address=text(field(row, "Адрес юридический")) or None,
@@ -310,9 +333,11 @@ def _import_applications(session, rows, index, field, has_field, years, user_id,
         order_items_created += _sync_order(session, order, desired, has_field("Квалификация"))
 
     result = ImportResult(
-        sum(row_counts.values()), len(seen_organizations), 0, len(seen_faculties), len(seen_specialties),
+        sum(row_counts.values()) + skipped_rows, len(seen_organizations), 0, len(seen_faculties), len(seen_specialties),
         organizations_created, 0, faculty_links_created, order_items_created,
         applications=len(seen_applications), applications_created=applications_created,
+        skipped_rows=skipped_rows, skipped_organizations=len(skipped_names),
+        skipped_names=tuple(sorted(skipped_names)),
     )
     current_audit_batch(session).record_values(
         AuditAction.FILE_UPLOAD, "excel_import", None, f"Импорт Excel {display_name}",
@@ -321,13 +346,18 @@ def _import_applications(session, rows, index, field, has_field, years, user_id,
             "organizations": result.organizations, "applications_created": result.applications_created,
             "order_items_created": result.order_items_created,
             "faculty_links_created": result.faculty_links_created,
+            **({"skipped_rows": result.skipped_rows, "skipped_organizations": result.skipped_organizations}
+               if result.skipped_rows else {}),
         },
     )
     return result
 
 
 @audited
-def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> ImportResult:
+def import_xlsx(
+    session, path: Path, user_id=None, original_filename=None,
+    create_unknown_organizations: bool = False,
+) -> ImportResult:
     """Synchronize import-owned snapshots without touching manual revisions."""
     worksheet = load_workbook(path, data_only=True, read_only=True).active
     headers = [text(cell.value) for cell in worksheet[1]]
@@ -345,7 +375,10 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
     statuses = [text(field(row, "Статус")) for _number, row in raw_rows if text(field(row, "Организация-заказчик"))]
     display_name = original_filename or path.name
     if statuses and all(status.casefold() == "заявка" for status in statuses):
-        return _import_applications(session, raw_rows, index, field, has_field, years, user_id, display_name)
+        return _import_applications(
+            session, raw_rows, index, field, has_field, years, user_id, display_name,
+            create_unknown_organizations,
+        )
 
     required = {"Организация-заказчик", "Факультет", "Номер договора", "Код специальности, направления специальности, специализации"}
     missing = sorted(required - index.keys())
@@ -367,12 +400,18 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
     groups: dict[tuple[int, str, int | None], DocumentGroup] = {}
     seen_organizations, seen_contracts, seen_faculties, seen_specialties = set(), set(), set(), set()
     organizations_created = contracts_created = faculty_links_created = order_items_created = 0
+    skipped_rows = 0
+    skipped_names = set()
 
     for parsed in parsed_rows:
         row = parsed.values
         name = text(field(row, "Организация-заказчик"))
         organization, unp = _find_organization(session, text(field(row, "УНП")), name)
         if organization is None:
+            if not create_unknown_organizations:
+                skipped_rows += 1
+                skipped_names.add(name)
+                continue
             organization = Organization(
                 unp=unp, short_name=name, full_name=text(field(row, "Полное наименование")) or name,
                 legal_address=text(field(row, "Адрес юридический")) or None,
@@ -509,6 +548,8 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
     result = ImportResult(
         len(parsed_rows), len(seen_organizations), len(seen_contracts), len(seen_faculties), len(seen_specialties),
         organizations_created, contracts_created, faculty_links_created, order_items_created,
+        skipped_rows=skipped_rows, skipped_organizations=len(skipped_names),
+        skipped_names=tuple(sorted(skipped_names)),
     )
     current_audit_batch(session).record_values(
         AuditAction.FILE_UPLOAD, "excel_import", None, f"Импорт Excel {display_name}",
@@ -517,6 +558,8 @@ def import_xlsx(session, path: Path, user_id=None, original_filename=None) -> Im
             "organizations": result.organizations, "contracts_created": result.contracts_created,
             "order_items_created": result.order_items_created,
             "faculty_links_created": result.faculty_links_created,
+            **({"skipped_rows": result.skipped_rows, "skipped_organizations": result.skipped_organizations}
+               if result.skipped_rows else {}),
         },
     )
     return result

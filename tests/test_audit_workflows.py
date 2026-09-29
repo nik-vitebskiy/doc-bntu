@@ -234,6 +234,7 @@ def test_scan_upload_download_soft_delete_and_restore_are_audited(session, contr
 def test_excel_import_records_current_user_and_system(session, client, tmp_path):
     response = client.post(
         "/import",
+        data={"create_unknown_organizations": "true"},
         files={"file": ("web-import.xlsx", _excel_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )
     assert response.status_code == 303
@@ -265,7 +266,10 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
 
     path = tmp_path / "system-import.xlsx"
     path.write_bytes(_excel_bytes("Системный импорт", "999200002"))
-    import_xlsx(session, path, original_filename="system-import.xlsx", audit_actor=AuditActor())
+    import_xlsx(
+        session, path, original_filename="system-import.xlsx",
+        create_unknown_organizations=True, audit_actor=AuditActor(),
+    )
     system_event = session.scalars(
         select(AuditLog).where(AuditLog.entity_type == "excel_import", AuditLog.entity_label.contains("system-import"))
     ).one()

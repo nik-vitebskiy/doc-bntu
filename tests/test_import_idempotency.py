@@ -10,7 +10,12 @@ from app.services.organization_service import canonical_faculty_name
 from app.services.organization_service import registry
 from app.services.organization_service import create_contract, save_item, update_contract
 import pytest
-from app.services.import_service import import_xlsx
+from app.services.import_service import import_xlsx as _import_xlsx
+
+
+def import_xlsx(*args, **kwargs):
+    kwargs.setdefault("create_unknown_organizations", True)
+    return _import_xlsx(*args, **kwargs)
 
 
 def sample_workbook():

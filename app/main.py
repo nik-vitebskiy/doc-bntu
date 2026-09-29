@@ -433,6 +433,7 @@ def registry(
     end_year: str = "",
     urgency: str = "",
     urgency_choice: str | None = None,
+    import_notice: str = "",
 ):
     valid_urgencies = {key for key, _label in URGENCY_BUCKETS}
     urgency = urgency if urgency in valid_urgencies else ""
@@ -460,6 +461,7 @@ def registry(
         "q": q,
         "selected_faculty": faculty,
         "selected_faculty_id": selected_faculty_id,
+        "import_notice": import_notice,
         "end_years": end_years,
         "selected_end_year": end_year,
         "urgency_buckets": URGENCY_BUCKETS,
@@ -640,7 +642,10 @@ async def add_application_file(request: Request, application_id: int, file_kind:
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/import")
-async def upload_import(request: Request, file: UploadFile = File(...)):
+async def upload_import(
+    request: Request, file: UploadFile = File(...),
+    create_unknown_organizations: bool = Form(False),
+):
     if not file.filename.lower().endswith(".xlsx"): raise HTTPException(400, "Нужен файл Excel .xlsx")
     original_filename = Path(file.filename).name
     handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -652,14 +657,19 @@ async def upload_import(request: Request, file: UploadFile = File(...)):
         handle.close()
     s = db()
     try:
-        result = import_xlsx(s, path, request.state.user.id, original_filename, audit_actor=audit_actor(request))
+        result = import_xlsx(
+            s, path, request.state.user.id, original_filename,
+            create_unknown_organizations=create_unknown_organizations,
+            audit_actor=audit_actor(request),
+        )
         logger.info(result.log_line("веб"))
     except Exception:
         raise
     finally:
         s.close()
         path.unlink(missing_ok=True)
-    return RedirectResponse("/", status_code=303)
+    notice = result.skipped_notice()
+    return RedirectResponse(f"/?{urlencode({'import_notice': notice})}" if notice else "/", status_code=303)
 
 @app.post("/reconciliation", response_class=HTMLResponse)
 async def reconcile_with_ais(request: Request, file: UploadFile = File(...)):

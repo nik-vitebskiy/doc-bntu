@@ -9,7 +9,7 @@ from app.models import (
     AdditionalAgreement, Contract, ContractFaculty, ContractRedirect, Document, Faculty,
     Order, OrderItem, OrderRedirect, Organization, Specialty,
 )
-from app.services.import_service import import_xlsx, parse_document_number
+from app.services.import_service import import_xlsx as _import_xlsx, parse_document_number
 from app.services.organization_service import (
     InactiveOrderRevisionError, delete_item, register_additional_agreement, save_item,
 )
@@ -19,6 +19,11 @@ HEADERS = [
     "Организация-заказчик", "УНП", "Факультет", "Номер договора", "Статус",
     "Код специальности, направления специальности, специализации", "Квалификация", "2027",
 ]
+
+
+def import_xlsx(*args, **kwargs):
+    kwargs.setdefault("create_unknown_organizations", True)
+    return _import_xlsx(*args, **kwargs)
 
 
 def write_workbook(path, rows):
