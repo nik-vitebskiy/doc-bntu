@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from sqlalchemy import select
+
 from app.main import app
 from app.models import (
     Application,
@@ -115,9 +117,9 @@ def test_application_registry_combines_search_faculty_status_and_scan(
         session,
         organization.id,
         ["Факультет заявок"],
-        "2026-09-23",
         "ЗАЯВКА-01",
         "2026-09-24",
+        "2027-12-31",
         user.id,
         audit_actor=actor,
     )
@@ -125,8 +127,8 @@ def test_application_registry_combines_search_faculty_status_and_scan(
         session,
         organization.id,
         ["Факультет заявок"],
-        "2026-09-22",
         "ЗАЯВКА-02",
+        "",
         "",
         user.id,
         audit_actor=actor,
@@ -158,11 +160,43 @@ def test_application_registry_combines_search_faculty_status_and_scan(
     assert f"/organizations/{organization.id}" in response.text
     assert "Есть подписанный скан" in response.text
     assert "Дата подписания" in response.text
+    assert "Действует до" in response.text
+    assert "31.12.2027" in response.text
+    assert "Дата получения" not in response.text
     assert "24.09.2026" in response.text
 
     card = client.get(f"/applications/{target.id}")
     assert card.status_code == 200
     assert 'href="/applications"' in card.text
+    assert "Действует до" in card.text
+    assert 'value="2027-12-31"' in card.text
+    assert "Получена:" not in card.text
+
+
+def test_application_is_created_without_received_date(session, organization, client):
+    faculty = Faculty(name="Факультет срока заявки")
+    session.add(faculty)
+    session.commit()
+
+    form = client.get(f"/organizations/{organization.id}/applications/new")
+    assert form.status_code == 200
+    assert "Дата получения" not in form.text
+    assert "Действует до" in form.text
+
+    response = client.post(
+        f"/organizations/{organization.id}/applications",
+        data={
+            "faculty": faculty.name,
+            "number": "З-СРОК",
+            "signed_date": "2026-09-29",
+            "date_end": "2027-09-29",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    application = session.scalar(select(Application).where(Application.number == "З-СРОК"))
+    assert application.received_date is None
+    assert application.date_end == date(2027, 9, 29)
 
 
 def test_applications_registry_has_one_get_route():

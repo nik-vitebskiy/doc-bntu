@@ -547,9 +547,11 @@ def new_application(request: Request, org_id: int):
     return views.TemplateResponse(request, "application_form.html", {"org": org, "faculties": s.query(Faculty).order_by(Faculty.name).all()})
 
 @app.post("/organizations/{org_id}/applications")
-def add_application(request: Request, org_id: int, faculty: list[str] = Form(...), received_date: str = Form(...), number: str = Form(""), signed_date: str = Form("")):
-    s = db(); application = create_application(s, org_id, faculty, received_date, number, signed_date, request.state.user.id, audit_actor=audit_actor(request))
-    return RedirectResponse(f"/applications/{application.id}", status_code=303)
+def add_application(request: Request, org_id: int, faculty: list[str] = Form(...), number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
+    s = db(); application = create_application(s, org_id, faculty, number, signed_date, date_end, request.state.user.id, audit_actor=audit_actor(request))
+    application_id = application.id
+    s.close()
+    return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.get("/applications/{application_id}", response_class=HTMLResponse)
 def application_card(request: Request, application_id: int, file_error: str = ""):
@@ -563,10 +565,10 @@ def application_card(request: Request, application_id: int, file_error: str = ""
     return response
 
 @app.post("/applications/{application_id}")
-def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form("")):
+def edit_application(request: Request, application_id: int, number: str = Form(""), signed_date: str = Form(""), date_end: str = Form("")):
     s = db(); application = s.get(Application, application_id)
     if not application: raise HTTPException(404)
-    update_application(s, application, number, signed_date, audit_actor=audit_actor(request))
+    update_application(s, application, number, signed_date, date_end, audit_actor=audit_actor(request))
     return RedirectResponse(f"/applications/{application_id}", status_code=303)
 
 @app.post("/applications/{application_id}/status")

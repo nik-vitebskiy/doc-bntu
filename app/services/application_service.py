@@ -6,11 +6,16 @@ from .organization_service import ensure_current_order, get_or_create_faculty, g
 
 
 @audited
-def create_application(session, organization_id, faculties, received_date, number, signed_date, user_id):
+def create_application(session, organization_id, faculties, number, signed_date, date_end, user_id):
     selected = [get_or_create_faculty(session, name) for name in faculties if name.strip()]
-    application = Application(organization_id=organization_id, received_date=date.fromisoformat(received_date),
-                              number=number.strip() or None, signed_date=date.fromisoformat(signed_date) if signed_date else None,
-                              status="Заявка", created_by=user_id)
+    application = Application(
+        organization_id=organization_id,
+        number=number.strip() or None,
+        signed_date=date.fromisoformat(signed_date) if signed_date else None,
+        date_end=date.fromisoformat(date_end) if date_end else None,
+        status="Заявка",
+        created_by=user_id,
+    )
     session.add(application); session.flush()
     for faculty in selected:
         session.add(ApplicationFaculty(application=application, faculty=faculty))
@@ -19,9 +24,10 @@ def create_application(session, organization_id, faculties, received_date, numbe
 
 
 @audited
-def update_application(session, application, number, signed_date):
+def update_application(session, application, number, signed_date, date_end):
     application.number = number.strip() or None
     application.signed_date = date.fromisoformat(signed_date) if signed_date else None
+    application.date_end = date.fromisoformat(date_end) if date_end else None
     return application
 
 

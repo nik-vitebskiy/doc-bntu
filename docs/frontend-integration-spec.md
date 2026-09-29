@@ -760,8 +760,8 @@ diff аудита.
     {
       "id": 3,
       "number": "З-2026/01",
-      "received_date": "2026-09-17",
       "signed_date": "2026-09-19",
+      "date_end": "2027-09-19",
       "status": "Закрыт",
       "faculties": [
         {"id": 1, "name": "Автотракторный"}
@@ -896,6 +896,9 @@ Content-Type: application/json
 
 ### 2.5. Заявки
 
+Поля дат заявки: `signed_date` — дата подписания, `date_end` — необязательный
+срок действия. Дата получения в пользовательском интерфейсе и API не используется.
+
 #### `GET /api/applications`
 
 Доступ: обе роли.
@@ -914,8 +917,8 @@ Content-Type: application/json
         "short_name": "ОАО \"МТЗ\"",
         "unp": "100316761"
       },
-      "received_date": "2026-09-17",
       "signed_date": "2026-09-19",
+      "date_end": "2027-09-19",
       "status": "Заявка",
       "faculties": [
         {"id": 1, "name": "Автотракторный"},
@@ -955,8 +958,8 @@ Content-Type: application/json
     "full_name": "Открытое акционерное общество \"Минский тракторный завод\""
   },
   "number": "З-2026/01",
-  "received_date": "2026-09-17",
   "signed_date": "2026-09-19",
+  "date_end": "2027-09-19",
   "status": "Заявка",
   "created_at": "2026-09-17T08:20:00+00:00",
   "created_by": {
