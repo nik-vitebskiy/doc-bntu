@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .api.router import OPENAPI_TAGS, router as api_router
 from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
+from .services.reconciliation_service import load_report, reconcile_xlsx, report_xlsx
 from .services.organization_service import InactiveOrderRevisionError, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
     authenticate,
@@ -659,6 +660,39 @@ async def upload_import(request: Request, file: UploadFile = File(...)):
         s.close()
         path.unlink(missing_ok=True)
     return RedirectResponse("/", status_code=303)
+
+@app.post("/reconciliation", response_class=HTMLResponse)
+async def reconcile_with_ais(request: Request, file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(400, "Нужен файл Excel .xlsx")
+    original_filename = Path(file.filename).name
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    path = Path(handle.name)
+    try:
+        while chunk := await file.read(1024 * 1024):
+            handle.write(chunk)
+    finally:
+        handle.close()
+    s = db()
+    try:
+        report = reconcile_xlsx(s, path, original_filename, audit_actor=audit_actor(request))
+        return views.TemplateResponse(request, "reconciliation.html", {"report": report})
+    finally:
+        s.close()
+        path.unlink(missing_ok=True)
+
+@app.get("/reconciliation/{token}/export")
+def export_reconciliation(token: str):
+    try:
+        report = load_report(token)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        raise HTTPException(404, "Отчёт сверки не найден.")
+    headers = {"Content-Disposition": f'attachment; filename="ais-reconciliation-{token[:8]}.xlsx"'}
+    return StreamingResponse(
+        report_xlsx(report),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 @app.get("/organizations/new", response_class=HTMLResponse)
 def new_org(request: Request): return views.TemplateResponse(request, "organization_form.html", {})

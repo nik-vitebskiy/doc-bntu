@@ -22,7 +22,7 @@ ENTITY_FILTERS = {
     "additional_agreement": ("Доп. соглашение", {"additional_agreement"}),
     "application": ("Заявка", {"application"}),
     "order": ("Строка заказа", {"order", "order_item", "annual_demand", "specialty"}),
-    "document": ("Файл", {"document", "document_attachment", "excel_import"}),
+    "document": ("Файл", {"document", "document_attachment", "excel_import", "ais_reconciliation"}),
     "faculty": ("Факультет", {"faculty", "contract_faculty", "application_faculty"}),
     "app_user": ("Пользователь", {"app_user"}),
     "app_setting": ("Системная настройка", {"app_setting"}),
@@ -85,6 +85,8 @@ FIELD_LABELS = {
     "applications_created": "Создано заявок",
     "faculty_links_created": "Связано факультетов",
     "order_items_created": "Добавлено строк заказа",
+    "differences_count": "Найдено расхождений",
+    "organizations_checked": "Проверено организаций",
     "username": "Логин",
     "password": "Пароль",
     "role": "Роль",
@@ -176,5 +178,6 @@ ENTITY_FIELD_ORDER = {
         "faculties",
         "specialties",
     ),
+    "ais_reconciliation": ("filename", "differences_count", "organizations_checked"),
 }
 
