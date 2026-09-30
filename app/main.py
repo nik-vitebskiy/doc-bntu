@@ -887,9 +887,9 @@ def export_reconciliation(token: str):
 def new_org(request: Request): return views.TemplateResponse(request, "organization_form.html", {})
 
 @app.post("/organizations/new")
-def create_org(request: Request, name: str = Form(""), unp: str = Form(""), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
-    validate_form(OrganizationForm, name=name, unp=unp)
-    s = db(); org = create_organization(s, name=name, unp=unp, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
+def create_org(request: Request, name: str = Form(""), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+    validate_form(OrganizationForm, name=name)
+    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
     org_id = org.id
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)

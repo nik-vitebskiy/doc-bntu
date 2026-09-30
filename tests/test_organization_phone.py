@@ -3,6 +3,12 @@ from sqlalchemy import select
 from app.models import Organization
 
 
+def test_create_organization_form_does_not_offer_unp(client):
+    response = client.get("/organizations/new")
+    assert response.status_code == 200
+    assert 'name="unp"' not in response.text
+
+
 def test_create_organization_with_phone(session, client):
     response = client.post(
         "/organizations/new",
