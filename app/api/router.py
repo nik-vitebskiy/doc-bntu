@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from .auth import router as auth_router
+from .resources import router as resources_router
 from .schemas import HealthResponse
 
 
@@ -16,12 +17,14 @@ OPENAPI_TAGS = [
         "name": "settings",
         "description": "Личный профиль, email и смена собственного пароля; доступно обеим ролям.",
     },
-    {"name": "import-export", "description": "Импорт данных из Excel и будущий экспорт."},
+    {"name": "import-export", "description": "Импорт, сверка с АИС и построчный экспорт в Excel."},
+    {"name": "specialties", "description": "Справочники факультетов и специальностей."},
 ]
 
 
 router = APIRouter(prefix="/api")
 router.include_router(auth_router)
+router.include_router(resources_router)
 
 
 @router.get(

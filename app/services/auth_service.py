@@ -179,3 +179,20 @@ def change_password(session: Session, user: AppUser, new_password: str) -> AppUs
         comment="Пароль изменён",
     )
     return user
+
+
+@audited
+def reset_password(session: Session, user: AppUser, new_password: str) -> AppUser:
+    """Set a temporary password without exposing its value to the audit log."""
+    if len(new_password) < 8:
+        raise ValueError("Пароль должен содержать не менее 8 символов.")
+    user.password_hash = hash_password(new_password)
+    user.must_change_password = True
+    current_audit_batch(session).record(
+        user,
+        AuditAction.UPDATE,
+        old={},
+        new={"must_change_password": True},
+        comment="Администратор сбросил пароль",
+    )
+    return user

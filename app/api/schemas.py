@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ErrorResponse(BaseModel):
@@ -24,6 +24,12 @@ class AuthenticatedUserResponse(BaseModel):
         description="Требуется обязательная смена временного пароля"
     )
     need_email: bool = Field(description="Требуется однократно заполнить электронную почту")
+
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "id": 1, "username": "admin", "email": "admin@bntu.by",
+        "full_name": "Иванов Иван Иванович", "role": "ADMIN",
+        "need_password_change": False, "need_email": False,
+    }})
 
 
 class UpdateEmailRequest(BaseModel):
