@@ -1,5 +1,6 @@
 from datetime import date
 
+from email_validator import EmailNotValidError, validate_email
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 
@@ -26,6 +27,13 @@ def _date(value: str, field: str, required: bool = False) -> date | None:
         return date.fromisoformat(value)
     except ValueError as error:
         raise ValueError(f"{field}: укажите корректную дату.") from error
+
+
+def _email(value: str) -> str:
+    try:
+        return validate_email(str(value or "").strip(), check_deliverability=False).normalized.lower()
+    except EmailNotValidError as error:
+        raise ValueError("Укажите корректный адрес электронной почты.") from error
 
 
 class OrganizationForm(BaseModel):
@@ -90,6 +98,7 @@ class AgreementForm(BaseModel):
 
 class UserCreateForm(BaseModel):
     username: str
+    email: str
     initial_password: str
 
     @field_validator("username", mode="before")
@@ -100,6 +109,11 @@ class UserCreateForm(BaseModel):
             raise ValueError("Логин должен содержать не менее 3 символов.")
         return value
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def valid_email(cls, value):
+        return _email(value)
+
     @field_validator("initial_password", mode="before")
     @classmethod
     def valid_password(cls, value):
@@ -107,6 +121,15 @@ class UserCreateForm(BaseModel):
         if len(value) < 8:
             raise ValueError("Пароль должен содержать не менее 8 символов.")
         return value
+
+
+class EmailForm(BaseModel):
+    email: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def valid_email(cls, value):
+        return _email(value)
 
 
 class OrderItemForm(BaseModel):

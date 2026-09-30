@@ -23,7 +23,7 @@ def migrated_schema_is_complete():
         bntu_count = connection.execute(text(
             "SELECT count(*) FROM app_setting WHERE key LIKE 'bntu.%'"
         )).scalar_one()
-    assert revision == "20260929_22"
+    assert revision == "20260930_23"
     assert faculty_count == 17
     assert bntu_count == 0
 
@@ -58,6 +58,7 @@ def session():
 def user(session):
     value = AppUser(
         username="auditor",
+        email="auditor@example.com",
         password_hash="test-only-hash",
         full_name="Тестовый сотрудник",
         role="ADMIN",
@@ -106,6 +107,7 @@ def client(session):
 
     admin = AppUser(
         username="test-admin",
+        email="test-admin@example.com",
         password_hash=hash_password("Test-password-123"),
         full_name="Администратор тестов",
         role="ADMIN",

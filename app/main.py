@@ -22,6 +22,7 @@ from .services.auth_service import (
     create_initial_admin,
     create_user,
     has_users,
+    update_email,
     update_user,
     verify_password,
 )
@@ -51,6 +52,7 @@ from .services.form_validation import (
     AgreementForm,
     ApplicationForm,
     ContractForm,
+    EmailForm,
     FormValidationError,
     OrganizationForm,
     UserCreateForm,
@@ -216,6 +218,7 @@ async def require_login(request: Request, call_next):
         return RedirectResponse(destination, status_code=303)
     request.state.user = user
     must_change_password = user.must_change_password
+    must_set_email = not bool(user.email)
     s.close()
     password_change_paths = {
         "/change-password", "/logout", "/api/auth/me",
@@ -228,6 +231,16 @@ async def require_login(request: Request, call_next):
                 status_code=403,
             )
         return RedirectResponse("/change-password", status_code=303)
+    email_paths = {
+        "/set-email", "/logout", "/api/auth/me", "/api/auth/logout", "/api/auth/email",
+    }
+    if must_set_email and path not in email_paths:
+        if path.startswith("/api/"):
+            return JSONResponse(
+                {"detail": "Необходимо указать электронную почту."},
+                status_code=403,
+            )
+        return RedirectResponse("/set-email", status_code=303)
     return await call_next(request)
 
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me-before-production"), https_only=False)
@@ -250,8 +263,10 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         return views.TemplateResponse(request, "login.html", {"error": "Неверный логин или пароль."}, status_code=401)
     request.session["user_id"] = user.id
     must_change_password = user.must_change_password
+    must_set_email = not bool(user.email)
     s.close()
-    return RedirectResponse("/change-password" if must_change_password else "/", status_code=303)
+    destination = "/change-password" if must_change_password else "/set-email" if must_set_email else "/"
+    return RedirectResponse(destination, status_code=303)
 
 @app.get("/logout")
 def logout(request: Request):
@@ -274,10 +289,11 @@ def setup(
     request: Request,
     full_name: str = Form(""),
     username: str = Form(""),
+    email: str = Form(""),
     password: str = Form(""),
     password_repeat: str = Form(""),
 ):
-    validate_form(UserCreateForm, username=username, initial_password=password)
+    validate_form(UserCreateForm, username=username, email=email, initial_password=password)
     session = db()
     if has_users(session):
         session.close()
@@ -285,11 +301,11 @@ def setup(
     try:
         if password != password_repeat:
             raise ValueError("Пароли не совпадают.")
-        create_initial_admin(session, full_name, username, password)
+        create_initial_admin(session, full_name, username, email, password)
     except ValueError as error:
         session.close()
         return views.TemplateResponse(request, "setup.html", {
-            "error": str(error), "full_name": full_name, "username": username,
+            "error": str(error), "full_name": full_name, "username": username, "email": email,
         }, status_code=422)
     session.close()
     return RedirectResponse("/login", status_code=303)
@@ -324,6 +340,30 @@ def save_password(
             "error": str(error), "forced": forced,
         }, status_code=422)
     session.close()
+    session = db()
+    must_set_email = not bool(session.get(AppUser, request.state.user.id).email)
+    session.close()
+    return RedirectResponse("/set-email" if must_set_email else "/", status_code=303)
+
+
+@app.get("/set-email", response_class=HTMLResponse)
+def set_email_form(request: Request):
+    return views.TemplateResponse(request, "set_email.html", {"error": "", "forced": True})
+
+
+@app.post("/set-email", response_class=HTMLResponse)
+def save_required_email(request: Request, email: str = Form("")):
+    session = db()
+    user = session.get(AppUser, request.state.user.id)
+    try:
+        validate_form(EmailForm, email=email)
+        update_email(session, user, email, audit_actor=audit_actor(request))
+    except (FormValidationError, ValueError) as error:
+        session.close()
+        return views.TemplateResponse(request, "set_email.html", {
+            "error": str(error), "forced": True, "email": email,
+        }, status_code=422)
+    session.close()
     return RedirectResponse("/", status_code=303)
 
 
@@ -353,25 +393,26 @@ def add_user(
     request: Request,
     full_name: str = Form(""),
     username: str = Form(""),
+    email: str = Form(""),
     role: str = Form(""),
     initial_password: str = Form(""),
     password_repeat: str = Form(""),
 ):
     require_admin(request)
-    validate_form(UserCreateForm, username=username, initial_password=initial_password)
+    validate_form(UserCreateForm, username=username, email=email, initial_password=initial_password)
     session = db()
     try:
         if initial_password != password_repeat:
             raise ValueError("Пароли не совпадают.")
         create_user(
-            session, full_name, username, role, initial_password,
+            session, full_name, username, email, role, initial_password,
             audit_actor=audit_actor(request),
         )
     except ValueError as error:
         session.close()
         return views.TemplateResponse(request, "user_form.html", {
             "edited_user": None, "error": str(error), "full_name": full_name,
-            "username": username, "selected_role": role,
+            "username": username, "email": email, "selected_role": role,
         }, status_code=422)
     session.close()
     return RedirectResponse("/users", status_code=303)
@@ -413,7 +454,23 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_form(request: Request):
-    return views.TemplateResponse(request, "settings.html", {})
+    return views.TemplateResponse(request, "settings.html", {"email_error": ""})
+
+
+@app.post("/settings/email", response_class=HTMLResponse)
+def save_settings_email(request: Request, email: str = Form("")):
+    session = db()
+    user = session.get(AppUser, request.state.user.id)
+    try:
+        validate_form(EmailForm, email=email)
+        update_email(session, user, email, audit_actor=audit_actor(request))
+    except (FormValidationError, ValueError) as error:
+        session.close()
+        return views.TemplateResponse(request, "settings.html", {
+            "email_error": str(error), "email": email,
+        }, status_code=422)
+    session.close()
+    return RedirectResponse("/settings", status_code=303)
 
 
 @app.get("/specialties", response_class=HTMLResponse)

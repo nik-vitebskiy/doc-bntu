@@ -10,6 +10,7 @@
       <label>Логин<input value="{{ edited_user.username }}" disabled></label>
     {% else %}
       <label>Логин<input name="username" value="{{ username|default('') }}" autocomplete="username" minlength="3" required></label>
+      <label>Электронная почта<input name="email" type="email" value="{{ email|default('') }}" autocomplete="email" required></label>
     {% endif %}
     {% set current_role = selected_role|default(edited_user.role if edited_user else 'HEAD') %}
     <label>Роль<select name="role" required><option value="HEAD" {{ 'selected' if current_role == 'HEAD' }}>Руководитель отдела</option><option value="ADMIN" {{ 'selected' if current_role == 'ADMIN' }}>Администратор</option></select></label>

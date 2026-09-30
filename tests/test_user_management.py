@@ -13,6 +13,7 @@ def test_empty_database_allows_one_time_admin_setup(session):
         response = browser.post("/setup", data={
             "full_name": "Первый администратор",
             "username": "first-admin",
+            "email": "first-admin@example.com",
             "password": "First-password-123",
             "password_repeat": "First-password-123",
         })
@@ -21,6 +22,7 @@ def test_empty_database_allows_one_time_admin_setup(session):
     assert response.headers["location"] == "/login"
     user = session.scalar(select(AppUser).where(AppUser.username == "first-admin"))
     assert user.role == "ADMIN"
+    assert user.email == "first-admin@example.com"
     assert user.must_change_password is False
     assert verify_password("First-password-123", user.password_hash)
     audit = session.scalar(select(AuditLog).where(AuditLog.entity_type == "app_user"))
@@ -33,6 +35,7 @@ def test_admin_creates_user_and_first_login_requires_password_change(client, ses
     response = client.post("/users/new", data={
         "full_name": "Руководитель отдела",
         "username": "department-head",
+        "email": "department-head@example.com",
         "role": "HEAD",
         "initial_password": "Initial-password-123",
         "password_repeat": "Initial-password-123",
@@ -40,6 +43,7 @@ def test_admin_creates_user_and_first_login_requires_password_change(client, ses
     assert response.status_code == 303
     user = session.scalar(select(AppUser).where(AppUser.username == "department-head"))
     assert user.must_change_password is True
+    assert user.email == "department-head@example.com"
     assert session.scalar(select(AuditLog).where(
         AuditLog.entity_type == "app_user", AuditLog.entity_id == user.id, AuditLog.action == "CREATE"
     )) is not None
@@ -68,11 +72,34 @@ def test_admin_creates_user_and_first_login_requires_password_change(client, ses
     assert event.diff == {"old": {}, "new": {}}
 
 
+def test_user_email_is_required_valid_and_unique(client):
+    missing = client.post("/users/new", data={
+        "full_name": "Без адреса", "username": "no-email", "role": "HEAD",
+        "initial_password": "Initial-password-123", "password_repeat": "Initial-password-123",
+    })
+    assert missing.status_code == 422
+    assert "корректный адрес электронной почты" in missing.text
+
+    invalid = client.post("/users/new", data={
+        "full_name": "Плохой адрес", "username": "bad-email", "email": "wrong", "role": "HEAD",
+        "initial_password": "Initial-password-123", "password_repeat": "Initial-password-123",
+    })
+    assert invalid.status_code == 422
+
+    duplicate = client.post("/users/new", data={
+        "full_name": "Дубликат", "username": "duplicate-email", "email": "test-admin@example.com", "role": "HEAD",
+        "initial_password": "Initial-password-123", "password_repeat": "Initial-password-123",
+    })
+    assert duplicate.status_code == 422
+    assert "уже существует" in duplicate.text
+
+
 def test_head_cannot_manage_users(session):
     from app.main import app
 
     head = AppUser(
         username="head-user",
+        email="head-user@example.com",
         password_hash=hash_password("Head-password-123"),
         full_name="Руководитель",
         role="HEAD",
@@ -97,7 +124,7 @@ def test_admin_can_edit_name_and_role_but_not_demote_last_admin(client, session)
     assert session.get(AppUser, admin.id).role == "ADMIN"
 
     second = create_user(
-        session, "Второй администратор", "second-admin", "ADMIN", "Second-password-123",
+        session, "Второй администратор", "second-admin", "second-admin@example.com", "ADMIN", "Second-password-123",
     )
     changed = client.post(f"/users/{second.id}/edit", data={
         "full_name": "Обновлённое имя", "role": "HEAD",

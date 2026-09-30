@@ -10,6 +10,7 @@ def test_admin_sees_profile_and_security_in_settings(client, user):
     assert response.status_code == 200
     assert "Личные данные" in response.text
     assert "Безопасность" in response.text
+    assert "test-admin@example.com" in response.text
     assert 'href="/change-password"' in response.text
     assert "Реквизиты БНТУ" not in response.text
 
@@ -19,6 +20,7 @@ def test_head_can_open_settings_and_sees_menu_link(session):
 
     head = AppUser(
         username="settings-head",
+        email="settings-head@example.com",
         password_hash=hash_password("Head-password-123"),
         full_name="Руководитель",
         role="HEAD",
@@ -38,3 +40,42 @@ def test_head_can_open_settings_and_sees_menu_link(session):
 
 def test_requisites_form_endpoint_is_removed(client):
     assert client.post("/settings", data={"unp": "100354447"}).status_code == 405
+
+
+def test_user_can_update_email_with_validation(client, session):
+    invalid = client.post("/settings/email", data={"email": "not-an-email"})
+    assert invalid.status_code == 422
+    assert "корректный адрес электронной почты" in invalid.text
+
+    saved = client.post("/settings/email", data={"email": "New.Address@BNTU.BY"})
+    assert saved.status_code == 303
+    session.expire_all()
+    user = session.query(AppUser).filter_by(username="test-admin").one()
+    assert user.email == "new.address@bntu.by"
+
+
+def test_existing_user_without_email_must_fill_it_once(session):
+    from app.main import app
+
+    user = AppUser(
+        username="legacy-user",
+        password_hash=hash_password("Legacy-password-123"),
+        full_name="Старый пользователь",
+        role="HEAD",
+        must_change_password=False,
+    )
+    session.add(user)
+    session.commit()
+    with TestClient(app, follow_redirects=False) as browser:
+        login = browser.post("/login", data={
+            "username": "legacy-user", "password": "Legacy-password-123",
+        })
+        assert login.headers["location"] == "/set-email"
+        assert browser.get("/").headers["location"] == "/set-email"
+        saved = browser.post("/set-email", data={"email": "legacy@example.com"})
+        assert saved.status_code == 303
+        assert saved.headers["location"] == "/"
+        assert browser.get("/").status_code == 200
+
+    session.expire_all()
+    assert session.get(AppUser, user.id).email == "legacy@example.com"

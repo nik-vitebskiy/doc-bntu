@@ -94,6 +94,7 @@ FIELD_LABELS = {
     "skipped_rows": "Пропущено строк",
     "skipped_organizations": "Пропущено организаций",
     "username": "Логин",
+    "email": "Электронная почта",
     "password": "Пароль",
     "role": "Роль",
     "is_active": "Активен",

@@ -5,7 +5,7 @@ from .schemas import HealthResponse
 
 
 OPENAPI_TAGS = [
-    {"name": "auth", "description": "Вход, выход, текущая сессия и смена пароля."},
+    {"name": "auth", "description": "Вход, выход, текущая сессия, email и смена пароля."},
     {"name": "organizations", "description": "Организации-заказчики и факультетские представления реестра."},
     {"name": "contracts", "description": "Договоры и дополнительные соглашения."},
     {"name": "applications", "description": "Заявки организаций-заказчиков."},
@@ -14,7 +14,7 @@ OPENAPI_TAGS = [
     {"name": "users", "description": "Управление пользователями; только для администратора."},
     {
         "name": "settings",
-        "description": "Личный профиль и смена собственного пароля; доступно обеим ролям.",
+        "description": "Личный профиль, email и смена собственного пароля; доступно обеим ролям.",
     },
     {"name": "import-export", "description": "Импорт данных из Excel и будущий экспорт."},
 ]

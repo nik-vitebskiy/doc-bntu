@@ -10,6 +10,7 @@ class AppUser(Base):
     __tablename__ = "app_user"
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(100), unique=True)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(30), default="SYSTEM")
