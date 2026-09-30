@@ -45,7 +45,7 @@ def require_api_user(request: Request, _cookie: str | None = Security(cookie_aut
     response_model=AuthenticatedUserResponse,
     responses={
         401: {"model": ErrorResponse, "description": "Неверный логин или пароль"},
-        422: {"description": "Ошибка проверки тела запроса"},
+        422: {"model": ErrorResponse, "description": "Ошибка проверки тела запроса"},
     },
     summary="Войти в систему",
     description=(
@@ -73,6 +73,7 @@ def login(payload: LoginRequest, request: Request):
     response_class=Response,
     responses={401: {"model": ErrorResponse, "description": "Сессия отсутствует"}},
     summary="Выйти из системы",
+    description="Завершает серверную сессию. Успешный ответ 204 не содержит тела — это штатно.",
 )
 def logout(request: Request, _user: AppUser = Security(require_api_user)):
     request.session.clear()
@@ -102,6 +103,7 @@ def current_user(user: AppUser = Security(require_api_user)):
     responses={
         400: {"model": ErrorResponse, "description": "Некорректный или уже занятый адрес"},
         401: {"model": ErrorResponse, "description": "Сессия отсутствует"},
+        422: {"model": ErrorResponse, "description": "Ошибка проверки адреса"},
     },
     summary="Изменить свою электронную почту",
 )
@@ -138,14 +140,15 @@ def save_email(
     responses={
         400: {"model": ErrorResponse, "description": "Текущий пароль указан неверно"},
         401: {"model": ErrorResponse, "description": "Сессия отсутствует"},
-        422: {"description": "Новый пароль короче 8 символов"},
+        422: {"model": ErrorResponse, "description": "Новый пароль короче 8 символов"},
     },
     summary="Сменить свой пароль",
     description=(
         "Меняет пароль текущего сотрудника. Доступно администратору и руководителю. "
         "Поле повторного пароля существует только в интерфейсе: React проверяет совпадение "
         "двух новых паролей и отправляет серверу только current_password и new_password. "
-        "Пароли и их хеши не возвращаются и не попадают в журнал действий."
+        "Пароли и их хеши не возвращаются и не попадают в журнал действий. "
+        "Успешный ответ 204 не содержит тела — это штатно."
     ),
 )
 def save_password(

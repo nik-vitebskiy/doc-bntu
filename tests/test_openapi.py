@@ -15,6 +15,39 @@ EXPECTED_TAGS = {
     "users",
     "settings",
     "import-export",
+    "specialties",
+}
+
+EXPECTED_OPERATIONS = {
+    ("post", "/api/auth/login"), ("post", "/api/auth/logout"),
+    ("get", "/api/auth/me"), ("put", "/api/auth/email"),
+    ("post", "/api/auth/change-password"),
+    ("get", "/api/faculties"), ("get", "/api/specialties"),
+    ("put", "/api/specialties/{specialty_id}"),
+    ("get", "/api/organizations"), ("get", "/api/organizations/{organization_id}"),
+    ("get", "/api/statistics"),
+    ("get", "/api/contracts"), ("post", "/api/contracts"),
+    ("get", "/api/contracts/{contract_id}"), ("put", "/api/contracts/{contract_id}"),
+    ("post", "/api/contracts/{contract_id}/status"),
+    ("post", "/api/contracts/{contract_id}/order-items"),
+    ("post", "/api/contracts/{contract_id}/additional-agreements"),
+    ("get", "/api/contracts/{contract_id}/order-history"),
+    ("get", "/api/contracts/{contract_id}/order-comparison"),
+    ("post", "/api/additional-agreements/{agreement_id}/activate"),
+    ("post", "/api/additional-agreements/{agreement_id}/status"),
+    ("get", "/api/additional-agreements/{agreement_id}/order-history"),
+    ("get", "/api/applications"), ("post", "/api/applications"),
+    ("get", "/api/applications/{application_id}"), ("put", "/api/applications/{application_id}"),
+    ("post", "/api/applications/{application_id}/status"),
+    ("get", "/api/orders/{order_id}"), ("post", "/api/orders/{order_id}/items"),
+    ("put", "/api/order-items/{item_id}"), ("delete", "/api/order-items/{item_id}"),
+    ("get", "/api/audit"), ("get", "/api/audit/metadata"),
+    ("get", "/api/users"), ("post", "/api/users"),
+    ("put", "/api/users/{user_id}"), ("post", "/api/users/{user_id}/reset-password"),
+    ("get", "/api/settings/profile"),
+    ("post", "/api/import"), ("get", "/api/imports"),
+    ("post", "/api/reconciliation"), ("get", "/api/reconciliation/{token}/export"),
+    ("get", "/api/export/contracts"), ("get", "/api/export/applications"),
 }
 
 
@@ -25,13 +58,13 @@ def test_openapi_contains_only_documented_json_routes_and_cookie_security():
     assert response.status_code == 200
     schema = response.json()
     assert {tag["name"] for tag in schema["tags"]} == EXPECTED_TAGS
-    assert set(schema["paths"]) == {
-        "/api/auth/login",
-        "/api/auth/logout",
-        "/api/auth/me",
-        "/api/auth/email",
-        "/api/auth/change-password",
+    operations = {
+        (method, path)
+        for path, path_item in schema["paths"].items()
+        for method in path_item
+        if method in {"get", "post", "put", "patch", "delete"}
     }
+    assert operations == EXPECTED_OPERATIONS
     assert schema["components"]["securitySchemes"]["cookieAuth"] == {
         "type": "apiKey",
         "description": (
@@ -53,6 +86,48 @@ def test_openapi_contains_only_documented_json_routes_and_cookie_security():
     assert password_schema["properties"]["new_password"]["minLength"] == 8
     assert "/api/health" not in schema["paths"]
     assert "/login" not in schema["paths"]
+
+
+def test_every_documented_operation_has_summary_tags_security_and_response_schema():
+    schema = app.openapi()
+    for method, path in EXPECTED_OPERATIONS:
+        operation = schema["paths"][path][method]
+        assert operation.get("summary"), f"Нет summary: {method.upper()} {path}"
+        assert operation.get("tags"), f"Нет tags: {method.upper()} {path}"
+        if path != "/api/auth/login":
+            assert operation.get("security") == [{"cookieAuth": []}], f"Нет cookieAuth: {method.upper()} {path}"
+            assert "401" in operation["responses"]
+        success_code = "204" if (method, path) in {
+            ("post", "/api/auth/logout"),
+            ("post", "/api/auth/change-password"),
+            ("delete", "/api/order-items/{item_id}"),
+            ("post", "/api/users/{user_id}/reset-password"),
+        } else "201" if (method, path) in {
+            ("post", "/api/contracts"),
+            ("post", "/api/contracts/{contract_id}/additional-agreements"),
+            ("post", "/api/applications"),
+            ("post", "/api/orders/{order_id}/items"),
+            ("post", "/api/contracts/{contract_id}/order-items"),
+            ("post", "/api/users"),
+        } else "200"
+        assert success_code in operation["responses"]
+        if success_code != "204":
+            assert operation["responses"][success_code].get("content"), f"Нет схемы ответа: {method.upper()} {path}"
+
+
+def test_openapi_uses_multi_faculty_email_and_string_year_contracts():
+    schema = app.openapi()
+    contract_parameters = schema["paths"]["/api/contracts"]["get"]["parameters"]
+    faculty_ids = next(item for item in contract_parameters if item["name"] == "faculty_ids")
+    assert faculty_ids["schema"]["type"] == "array"
+    assert schema["components"]["schemas"]["UserCreate"]["required"] == [
+        "full_name", "username", "email", "initial_password"
+    ]
+    current_user = schema["components"]["schemas"]["AuthenticatedUserResponse"]["properties"]
+    assert "email" in current_user and "need_email" in current_user
+    years = schema["components"]["schemas"]["OrderItemResponse"]["properties"]["years"]
+    assert years["additionalProperties"]["type"] == "integer"
+    assert "2026" in years["examples"][0]
 
 
 def test_swagger_is_enabled_by_default_and_can_be_disabled(monkeypatch):
