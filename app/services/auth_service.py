@@ -4,6 +4,7 @@ import hmac
 import os
 from datetime import datetime, timezone
 
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,7 @@ from .audit_service import AuditAction, AuditActor, AuditBatch, audit_login_enab
 
 PBKDF2_ITERATIONS = 600_000
 USER_ROLES = {"ADMIN", "HEAD"}
+EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
 def hash_password(password: str) -> str:
@@ -54,25 +56,38 @@ def _normalized_user_values(full_name: str, username: str, role: str) -> tuple[s
     return full_name[:255], username[:100], role
 
 
+def normalize_email(email: str) -> str:
+    try:
+        return str(EMAIL_ADAPTER.validate_python(str(email or "").strip())).lower()
+    except ValidationError as error:
+        raise ValueError("Укажите корректный адрес электронной почты.") from error
+
+
 @audited
 def create_user(
     session: Session,
     full_name: str,
     username: str,
+    email: str,
     role: str,
     initial_password: str,
     *,
     force_password_change: bool = True,
 ) -> AppUser:
     full_name, username, role = _normalized_user_values(full_name, username, role)
+    email = normalize_email(email)
     if len(initial_password) < 8:
         raise ValueError("Пароль должен содержать не менее 8 символов.")
     duplicate = session.query(AppUser.id).filter(func.lower(AppUser.username) == username.lower()).first()
     if duplicate:
         raise ValueError("Пользователь с таким логином уже существует.")
+    duplicate_email = session.query(AppUser.id).filter(func.lower(AppUser.email) == email).first()
+    if duplicate_email:
+        raise ValueError("Пользователь с такой электронной почтой уже существует.")
     user = AppUser(
         full_name=full_name,
         username=username,
+        email=email,
         role=role,
         password_hash=hash_password(initial_password),
         must_change_password=force_password_change,
@@ -86,6 +101,7 @@ def create_initial_admin(
     session: Session,
     full_name: str,
     username: str,
+    email: str,
     password: str,
     *,
     audit_actor: AuditActor | None = None,
@@ -96,6 +112,7 @@ def create_initial_admin(
         session,
         full_name,
         username,
+        email,
         "ADMIN",
         password,
         force_password_change=False,
@@ -112,6 +129,19 @@ def update_user(session: Session, user: AppUser, full_name: str, role: str) -> A
             raise ValueError("Нельзя изменить роль единственного администратора.")
     user.full_name = full_name
     user.role = role
+    return user
+
+
+@audited
+def update_email(session: Session, user: AppUser, email: str) -> AppUser:
+    normalized = normalize_email(email)
+    duplicate = session.query(AppUser.id).filter(
+        func.lower(AppUser.email) == normalized,
+        AppUser.id != user.id,
+    ).first()
+    if duplicate:
+        raise ValueError("Пользователь с такой электронной почтой уже существует.")
+    user.email = normalized
     return user
 
 

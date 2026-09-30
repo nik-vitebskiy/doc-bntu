@@ -48,6 +48,7 @@ def test_head_can_view_but_cannot_edit_specialty_directory(session):
     specialty = Specialty(code="HEAD-01", name="Название")
     head = AppUser(
         username="specialty-head",
+        email="specialty-head@example.com",
         password_hash=hash_password("Head-password-123"),
         full_name="Руководитель",
         role="HEAD",

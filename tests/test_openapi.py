@@ -29,6 +29,7 @@ def test_openapi_contains_only_documented_json_routes_and_cookie_security():
         "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/me",
+        "/api/auth/email",
         "/api/auth/change-password",
     }
     assert schema["components"]["securitySchemes"]["cookieAuth"] == {
@@ -77,6 +78,7 @@ def test_api_returns_json_401_instead_of_legacy_redirect():
 def test_login_cookie_authorizes_following_api_request(session):
     user = AppUser(
         username="swagger-user",
+        email="swagger-user@example.com",
         password_hash=hash_password("Swagger-password-123"),
         full_name="Пользователь Swagger",
         role="HEAD",
@@ -94,15 +96,22 @@ def test_login_cookie_authorizes_following_api_request(session):
         assert login.json() == {
             "id": user.id,
             "username": "swagger-user",
+            "email": "swagger-user@example.com",
             "full_name": "Пользователь Swagger",
             "role": "HEAD",
             "need_password_change": False,
+            "need_email": False,
         }
         assert browser.cookies.get("session")
 
         current = browser.get("/api/auth/me")
         assert current.status_code == 200
         assert current.json() == login.json()
+
+        changed_email = browser.put("/api/auth/email", json={"email": "updated@example.com"})
+        assert changed_email.status_code == 200
+        assert changed_email.json()["email"] == "updated@example.com"
+        assert changed_email.json()["need_email"] is False
 
         logout = browser.post("/api/auth/logout")
         assert logout.status_code == 204
@@ -112,6 +121,7 @@ def test_login_cookie_authorizes_following_api_request(session):
 def test_forced_password_change_is_available_through_api(session):
     user = AppUser(
         username="new-user",
+        email="new-user@example.com",
         password_hash=hash_password("Temporary-password-123"),
         full_name="Новый пользователь",
         role="HEAD",

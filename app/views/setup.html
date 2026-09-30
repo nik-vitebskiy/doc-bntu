@@ -16,6 +16,7 @@
     <form method="post" action="/setup" class="account-form">
       <label>ФИО<input name="full_name" value="{{ full_name|default('') }}" required autofocus></label>
       <label>Логин<input name="username" value="{{ username|default('') }}" autocomplete="username" required></label>
+      <label>Электронная почта<input name="email" type="email" value="{{ email|default('') }}" autocomplete="email" required></label>
       <label>Пароль<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
       <label>Повторите пароль<input name="password_repeat" type="password" minlength="8" autocomplete="new-password" required></label>
       <p class="form-hint">Не менее 8 символов.</p>

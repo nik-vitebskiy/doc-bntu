@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlalchemy import select
 
-from app.models import Application, Contract, Faculty, OrderItem, Specialty
+from app.models import AnnualDemand, Application, Contract, Faculty, Order, OrderItem, Specialty
 from app.services.application_service import create_application
 
 
@@ -158,4 +158,32 @@ def test_order_item_web_form_only_accepts_specialty_from_catalog(
     session.expire_all()
     assert item.specialty_id == specialty_without_qualification.id
     assert item.qualification_value is None
+
+
+def test_contract_card_displays_annual_demand_values(session, contract, client):
+    specialty = Specialty(code="DISPLAY-01", name="Проверка отображения")
+    order = Order(
+        organization_id=contract.organization_id,
+        contract_id=contract.id,
+        is_current=True,
+        status="CURRENT",
+        revision=1,
+    )
+    item = OrderItem(
+        order=order,
+        faculty_id=contract.faculty_links[0].faculty_id,
+        specialty_ref=specialty,
+    )
+    session.add(item)
+    item.annual_demands.extend([
+        AnnualDemand(year=2026, quantity=15),
+        AnnualDemand(year=2027, quantity=16),
+    ])
+    session.commit()
+
+    page = client.get(f"/organizations/{contract.organization_id}")
+
+    assert page.status_code == 200
+    assert 'name="demand_2026" value="15"' in page.text
+    assert 'name="demand_2027" value="16"' in page.text
 

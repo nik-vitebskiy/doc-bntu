@@ -8,10 +8,9 @@ from fastapi.testclient import TestClient
 
 
 def test_organization_contract_and_application_bad_forms_are_422(client, organization):
-    response = client.post("/organizations/new", data={"name": "", "unp": "12A"})
+    response = client.post("/organizations/new", data={"name": ""})
     assert response.status_code == 422
     assert "Краткое наименование обязательно" in response.text
-    assert "УНП должен" in response.text
 
     response = client.post(
         f"/organizations/{organization.id}/contract",
@@ -128,7 +127,7 @@ def test_failed_forms_never_mutate_existing_audit_rows(client, session):
             "full_name": admin.full_name,
             "role": "HEAD",
         })
-        invalid = client.post("/organizations/new", data={"name": "", "unp": "bad"})
+        invalid = client.post("/organizations/new", data={"name": ""})
     finally:
         event.remove(engine, "before_cursor_execute", catch_audit_mutation)
 

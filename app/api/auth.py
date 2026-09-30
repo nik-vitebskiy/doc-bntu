@@ -4,8 +4,8 @@ from fastapi.security import APIKeyCookie
 
 from ..models import AppUser, SessionLocal
 from ..services.audit_service import AuditActor
-from ..services.auth_service import authenticate, change_password, verify_password
-from .schemas import AuthenticatedUserResponse, ChangePasswordRequest, ErrorResponse, LoginRequest
+from ..services.auth_service import authenticate, change_password, update_email, verify_password
+from .schemas import AuthenticatedUserResponse, ChangePasswordRequest, ErrorResponse, LoginRequest, UpdateEmailRequest
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -25,9 +25,11 @@ def _user_response(user: AppUser) -> AuthenticatedUserResponse:
     return AuthenticatedUserResponse(
         id=user.id,
         username=user.username,
+        email=user.email,
         full_name=user.full_name,
         role=user.role,
         need_password_change=user.must_change_password,
+        need_email=not bool(user.email),
     )
 
 
@@ -84,13 +86,48 @@ def logout(request: Request, _user: AppUser = Security(require_api_user)):
     responses={401: {"model": ErrorResponse, "description": "Сессия отсутствует"}},
     summary="Получить личные данные текущего сотрудника",
     description=(
-        "Возвращает ФИО, логин, роль и признак обязательной смены пароля. "
+        "Возвращает ФИО, логин, email, роль и признаки обязательного заполнения. "
         "React использует ответ для вкладки «Профиль» раздела «Настройки». "
         "Поля профиля доступны только для чтения."
     ),
 )
 def current_user(user: AppUser = Security(require_api_user)):
     return _user_response(user)
+
+
+@router.put(
+    "/email",
+    tags=["settings"],
+    response_model=AuthenticatedUserResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Некорректный или уже занятый адрес"},
+        401: {"model": ErrorResponse, "description": "Сессия отсутствует"},
+    },
+    summary="Изменить свою электронную почту",
+)
+def save_email(
+    payload: UpdateEmailRequest,
+    request: Request,
+    authenticated_user: AppUser = Security(require_api_user),
+):
+    session = SessionLocal()
+    try:
+        user = session.get(AppUser, authenticated_user.id)
+        if user is None:
+            request.session.clear()
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Требуется авторизация.")
+        try:
+            update_email(
+                session,
+                user,
+                str(payload.email),
+                audit_actor=AuditActor(user.id, request.client.host if request.client else None),
+            )
+        except ValueError as error:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+        return _user_response(user)
+    finally:
+        session.close()
 
 
 @router.post(

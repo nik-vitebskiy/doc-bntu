@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class ErrorResponse(BaseModel):
@@ -15,6 +15,7 @@ class LoginRequest(BaseModel):
 class AuthenticatedUserResponse(BaseModel):
     id: int = Field(description="Идентификатор сотрудника")
     username: str = Field(description="Логин; в личном профиле доступен только для чтения")
+    email: str | None = Field(description="Электронная почта сотрудника")
     full_name: str | None = Field(description="ФИО сотрудника; в личном профиле доступно только для чтения")
     role: Literal["ADMIN", "HEAD"] = Field(
         description="Роль: ADMIN — администратор, HEAD — руководитель отдела"
@@ -22,6 +23,11 @@ class AuthenticatedUserResponse(BaseModel):
     need_password_change: bool = Field(
         description="Требуется обязательная смена временного пароля"
     )
+    need_email: bool = Field(description="Требуется однократно заполнить электронную почту")
+
+
+class UpdateEmailRequest(BaseModel):
+    email: EmailStr = Field(examples=["employee@bntu.by"], description="Новый адрес электронной почты")
 
 
 class ChangePasswordRequest(BaseModel):

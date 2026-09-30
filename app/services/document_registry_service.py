@@ -56,7 +56,11 @@ def _page(total: int, requested: int) -> tuple[int, int, int]:
     return page, pages, (page - 1) * PAGE_SIZE
 
 
-def _contract_base_conditions(query_text: str, faculty: str, status: str, end_year: str):
+def _faculty_names(faculty: str | list[str]) -> list[str]:
+    return [faculty] if isinstance(faculty, str) and faculty else [value for value in faculty if value]
+
+
+def _contract_base_conditions(query_text: str, faculty: str | list[str], status: str, end_year: str):
     conditions = []
     needle = query_text.strip()
     if needle:
@@ -66,10 +70,11 @@ def _contract_base_conditions(query_text: str, faculty: str, status: str, end_ye
             Organization.full_name.ilike(pattern),
             Contract.number.ilike(pattern),
         ))
-    if faculty:
+    selected_faculties = _faculty_names(faculty)
+    if selected_faculties:
         conditions.append(exists(select(ContractFaculty.contract_id).join(Faculty).where(
             ContractFaculty.contract_id == Contract.id,
-            Faculty.name == faculty,
+            Faculty.name.in_(selected_faculties),
         )))
     active_agreement = exists(select(AdditionalAgreement.id).where(
         AdditionalAgreement.contract_id == Contract.id,
@@ -99,11 +104,11 @@ def contract_registry(
     session: Session,
     *,
     query_text: str = "",
-    faculty: str = "",
+    faculty: str | list[str] = "",
     status: str = "",
     end_year: str = "",
     urgency: str = "",
-    page: int = 1,
+    page: int | None = 1,
 ):
     conditions = _contract_base_conditions(query_text, faculty, status, end_year)
     today = date.today()
@@ -118,7 +123,7 @@ def contract_registry(
     selected_condition = _urgency_condition(selected_urgency, today)
     selected_conditions = [*conditions, selected_condition] if selected_condition is not None else conditions
     total = session.scalar(select(func.count(Contract.id)).join(Organization).where(*selected_conditions)) or 0
-    page, pages, offset = _page(total, page)
+    current_page, pages, offset = _page(total, page or 1)
 
     statement = (
         select(Contract)
@@ -128,13 +133,15 @@ def contract_registry(
             joinedload(Contract.organization),
             selectinload(Contract.faculty_links).selectinload(ContractFaculty.faculty),
             selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.specialty_ref),
+            selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.faculty),
+            selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.annual_demands),
             selectinload(Contract.agreements).selectinload(AdditionalAgreement.documents).selectinload(Document.attachments),
             selectinload(Contract.documents).selectinload(Document.attachments),
         )
         .order_by(Contract.end_date.asc().nulls_last(), Contract.id.desc())
-        .offset(offset)
-        .limit(PAGE_SIZE)
     )
+    if page is not None:
+        statement = statement.offset(offset).limit(PAGE_SIZE)
     contracts = session.scalars(statement).unique().all()
     rows = [
         ContractRegistryRow(
@@ -152,17 +159,17 @@ def contract_registry(
         .distinct()
         .order_by(func.extract("year", Contract.end_date))
     ).all()
-    return RegistryPage(rows, total, page, pages), faculties, end_years, urgency_counts, selected_urgency
+    return RegistryPage(rows, total, current_page, pages), faculties, end_years, urgency_counts, selected_urgency
 
 
 def application_registry(
     session: Session,
     *,
     query_text: str = "",
-    faculty: str = "",
+    faculty: str | list[str] = "",
     status: str = "",
     urgency: str = "",
-    page: int = 1,
+    page: int | None = 1,
 ):
     conditions = []
     needle = query_text.strip()
@@ -173,10 +180,11 @@ def application_registry(
             Organization.full_name.ilike(pattern),
             Application.number.ilike(pattern),
         ))
-    if faculty:
+    selected_faculties = _faculty_names(faculty)
+    if selected_faculties:
         conditions.append(exists(select(ApplicationFaculty.application_id).join(Faculty).where(
             ApplicationFaculty.application_id == Application.id,
-            Faculty.name == faculty,
+            Faculty.name.in_(selected_faculties),
         )))
     if status in APPLICATION_STATUSES:
         conditions.append(Application.status == status)
@@ -184,7 +192,7 @@ def application_registry(
         conditions.append(Application.date_end <= date.today() + timedelta(days=30))
 
     total = session.scalar(select(func.count(Application.id)).join(Organization).where(*conditions)) or 0
-    page, pages, offset = _page(total, page)
+    current_page, pages, offset = _page(total, page or 1)
     statement = (
         select(Application)
         .join(Organization)
@@ -193,11 +201,14 @@ def application_registry(
             joinedload(Application.organization),
             selectinload(Application.faculty_links).selectinload(ApplicationFaculty.faculty),
             selectinload(Application.documents).selectinload(Document.attachments),
+            selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.specialty_ref),
+            selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.faculty),
+            selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.annual_demands),
         )
         .order_by(Application.signed_date.desc().nullslast(), Application.id.desc())
-        .offset(offset)
-        .limit(PAGE_SIZE)
     )
+    if page is not None:
+        statement = statement.offset(offset).limit(PAGE_SIZE)
     rows = session.scalars(statement).unique().all()
     faculties = session.scalars(select(Faculty.name).order_by(Faculty.name)).all()
-    return RegistryPage(rows, total, page, pages), faculties
+    return RegistryPage(rows, total, current_page, pages), faculties

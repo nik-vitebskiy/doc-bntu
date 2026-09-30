@@ -77,6 +77,6 @@ def test_web_import_defaults_to_skip_and_exposes_opt_in(client, session, tmp_pat
     )
     assert response.status_code == 303
     assert session.scalar(select(func.count()).select_from(Organization)) == 5
-    page = client.get("/")
+    page = client.get("/import-export")
     assert 'name="create_unknown_organizations"' in page.text
     assert "все организации республики" in page.text

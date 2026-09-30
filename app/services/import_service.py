@@ -51,6 +51,10 @@ class ImportResult:
     order_items_created: int
     applications: int = 0
     applications_created: int = 0
+    organizations_updated: int = 0
+    contracts_updated: int = 0
+    applications_updated: int = 0
+    order_items_updated: int = 0
     skipped_rows: int = 0
     skipped_organizations: int = 0
     skipped_names: tuple[str, ...] = ()
@@ -189,13 +193,15 @@ def _sync_order(
     # Customer decision: imported current orders are editable, but a repeated
     # import is authoritative and deliberately overwrites their manual changes.
     existing = {(item.faculty_id, item.specialty_id): item for item in order.items}
-    created = 0
+    created = updated = 0
     for key, line in desired.items():
         item = existing.pop(key, None)
         if item is None:
             item = OrderItem(order=order, faculty_id=line.faculty_id, specialty_id=line.specialty_id)
             session.add(item)
             created += 1
+        else:
+            updated += 1
         if qualification_present:
             item.qualification_value = line.qualification
         # Optional export columns are authoritative only when present. Thus a
@@ -213,7 +219,7 @@ def _sync_order(
     for item in existing.values():
         session.delete(item)
     session.flush()
-    return created
+    return created, updated
 
 
 def _application_organization_name(raw_value) -> str:
@@ -235,6 +241,9 @@ def _import_applications(
 
     seen_organizations, seen_applications, seen_faculties, seen_specialties = set(), set(), set(), set()
     organizations_created = applications_created = faculty_links_created = order_items_created = 0
+    order_items_updated = 0
+    organizations_created_ids, organizations_updated_ids = set(), set()
+    applications_created_ids, applications_updated_ids = set(), set()
     skipped_rows = 0
     skipped_names = set()
     groups: dict[int, dict[tuple[int | None, int], ImportLine]] = {}
@@ -259,7 +268,10 @@ def _import_applications(
             session.add(organization)
             session.flush()
             organizations_created += 1
+            organizations_created_ids.add(organization.id)
         else:
+            if organization.id not in organizations_created_ids:
+                organizations_updated_ids.add(organization.id)
             organization.short_name = name
             if has_field("Полное наименование"):
                 organization.full_name = text(field(row, "Полное наименование")) or name
@@ -285,7 +297,10 @@ def _import_applications(
             session.add(application)
             session.flush()
             applications_created += 1
+            applications_created_ids.add(application.id)
         else:
+            if application.id not in applications_created_ids:
+                applications_updated_ids.add(application.id)
             if has_field("Дата начала договора"):
                 application.signed_date = parse_date(field(row, "Дата начала договора"))
             if has_field("Дата окончания договора"):
@@ -343,14 +358,18 @@ def _import_applications(
             order.import_key = import_key
         order.is_current = True
         order.status = "CURRENT"
-        order_items_created += _sync_order(
+        created, updated = _sync_order(
             session, order, desired, has_field("Квалификация"), has_field("Профилизация")
         )
+        order_items_created += created
+        order_items_updated += updated
 
     result = ImportResult(
         sum(row_counts.values()) + skipped_rows, len(seen_organizations), 0, len(seen_faculties), len(seen_specialties),
         organizations_created, 0, faculty_links_created, order_items_created,
         applications=len(seen_applications), applications_created=applications_created,
+        organizations_updated=len(organizations_updated_ids),
+        applications_updated=len(applications_updated_ids), order_items_updated=order_items_updated,
         skipped_rows=skipped_rows, skipped_organizations=len(skipped_names),
         skipped_names=tuple(sorted(skipped_names)),
     )
@@ -358,8 +377,15 @@ def _import_applications(
         AuditAction.FILE_UPLOAD, "excel_import", None, f"Импорт Excel {display_name}",
         new={
             "filename": display_name, "rows_processed": result.rows_processed,
-            "organizations": result.organizations, "applications_created": result.applications_created,
+            "organizations": result.organizations,
+            "organizations_created": result.organizations_created,
+            "organizations_updated": result.organizations_updated,
+            "contracts_created": 0,
+            "contracts_updated": 0,
+            "applications_created": result.applications_created,
+            "applications_updated": result.applications_updated,
             "order_items_created": result.order_items_created,
+            "order_items_updated": result.order_items_updated,
             "faculty_links_created": result.faculty_links_created,
             **({"skipped_rows": result.skipped_rows, "skipped_organizations": result.skipped_organizations}
                if result.skipped_rows else {}),
@@ -415,6 +441,9 @@ def import_xlsx(
     groups: dict[tuple[int, str, int | None], DocumentGroup] = {}
     seen_organizations, seen_contracts, seen_faculties, seen_specialties = set(), set(), set(), set()
     organizations_created = contracts_created = faculty_links_created = order_items_created = 0
+    order_items_updated = 0
+    organizations_created_ids, organizations_updated_ids = set(), set()
+    contracts_created_ids, contracts_updated_ids = set(), set()
     skipped_rows = 0
     skipped_names = set()
 
@@ -435,7 +464,10 @@ def import_xlsx(
             session.add(organization)
             session.flush()
             organizations_created += 1
+            organizations_created_ids.add(organization.id)
         else:
+            if organization.id not in organizations_created_ids:
+                organizations_updated_ids.add(organization.id)
             organization.short_name = name
             if has_field("Полное наименование"):
                 organization.full_name = text(field(row, "Полное наименование")) or name
@@ -456,8 +488,12 @@ def import_xlsx(
             session.add(contract)
             session.flush()
             contracts_created += 1
-        elif has_field("Дата окончания договора"):
-            contract.end_date = parse_date(field(row, "Дата окончания договора"))
+            contracts_created_ids.add(contract.id)
+        else:
+            if contract.id not in contracts_created_ids:
+                contracts_updated_ids.add(contract.id)
+            if has_field("Дата окончания договора"):
+                contract.end_date = parse_date(field(row, "Дата окончания договора"))
         seen_contracts.add(contract.id)
 
         faculty_name = text(field(row, "Факультет"))
@@ -553,13 +589,15 @@ def import_xlsx(
                 desired = own_values
             group.order.revision = revision
             group.order.previous_order_id = previous_order.id if previous_order else None
-            order_items_created += _sync_order(
+            created, updated = _sync_order(
                 session,
                 group.order,
                 desired,
                 has_field("Квалификация"),
                 has_field("Профилизация"),
             )
+            order_items_created += created
+            order_items_updated += updated
             previous_order = group.order
 
         if not direct_group and any(group.agreement and group.status == "Активен" for group in ordered) and not manual_current:
@@ -572,6 +610,8 @@ def import_xlsx(
     result = ImportResult(
         len(parsed_rows), len(seen_organizations), len(seen_contracts), len(seen_faculties), len(seen_specialties),
         organizations_created, contracts_created, faculty_links_created, order_items_created,
+        organizations_updated=len(organizations_updated_ids),
+        contracts_updated=len(contracts_updated_ids), order_items_updated=order_items_updated,
         skipped_rows=skipped_rows, skipped_organizations=len(skipped_names),
         skipped_names=tuple(sorted(skipped_names)),
     )
@@ -579,8 +619,15 @@ def import_xlsx(
         AuditAction.FILE_UPLOAD, "excel_import", None, f"Импорт Excel {display_name}",
         new={
             "filename": display_name, "rows_processed": result.rows_processed,
-            "organizations": result.organizations, "contracts_created": result.contracts_created,
+            "organizations": result.organizations,
+            "organizations_created": result.organizations_created,
+            "organizations_updated": result.organizations_updated,
+            "contracts_created": result.contracts_created,
+            "contracts_updated": result.contracts_updated,
+            "applications_created": 0,
+            "applications_updated": 0,
             "order_items_created": result.order_items_created,
+            "order_items_updated": result.order_items_updated,
             "faculty_links_created": result.faculty_links_created,
             **({"skipped_rows": result.skipped_rows, "skipped_organizations": result.skipped_organizations}
                if result.skipped_rows else {}),

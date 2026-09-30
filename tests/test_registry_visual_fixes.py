@@ -33,9 +33,11 @@ def test_registry_renders_compact_specialty_labels_and_persistent_import_checkbo
     assert "SAME-01 — SAME-01" not in page.text
 
     registry_page = client.get("/")
-    assert 'data-persist-checkbox="registry:create-organizations:user:' in registry_page.text
-    assert "Создавать новые организации из файла" in registry_page.text
-    assert "В файле из АИС — все организации республики" in registry_page.text
+    assert "Создавать новые организации из файла" not in registry_page.text
+    import_page = client.get("/import-export")
+    assert 'data-persist-checkbox="import-export:create-organizations:user:' in import_page.text
+    assert "Создавать новые организации из файла" in import_page.text
+    assert "В файле из АИС — все организации республики" in import_page.text
 
     persistence_script = client.get("/static/persistent-checkbox.js")
     assert persistence_script.status_code == 200

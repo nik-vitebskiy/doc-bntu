@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Кадровый заказ</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260929-4">
+  <link rel="stylesheet" href="/static/style.css?v=20260930-1">
   <link rel="stylesheet" href="/static/forms.css?v=20260921-1">
   <script defer src="/static/status-dialog.js?v=20260928-1"></script>
   <script defer src="/static/faculty-picker.js?v=20260918-8"></script>
@@ -26,6 +26,7 @@
     <a class="{{ 'active' if nav_is_active(request, 'applications') }}" href="/applications">▤ Заявки</a>
     <a class="{{ 'active' if nav_is_active(request, 'contracts') }}" href="/contracts">▧ Договоры</a>
     <a class="{{ 'active' if nav_is_active(request, 'specialties') }}" href="/specialties">☷ Справочник специальностей</a>
+    <a class="{{ 'active' if nav_is_active(request, 'import_export') }}" href="/import-export">⇅ Импорт/Экспорт</a>
     <a class="{{ 'active' if nav_is_active(request, 'audit') }}" href="/audit">≣ Журнал действий</a>
     {% if request.state.user.role == 'ADMIN' %}<a class="{{ 'active' if nav_is_active(request, 'users') }}" href="/users">♙ Пользователи</a>{% endif %}<span></span><a class="{{ 'active' if nav_is_active(request, 'settings') }}" href="/settings">⚙ Настройки</a>
   </aside>

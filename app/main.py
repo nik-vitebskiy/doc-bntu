@@ -2,7 +2,7 @@ import json, logging, os, tempfile
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote, urlencode
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
@@ -10,9 +10,9 @@ from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import func
+from sqlalchemy import func, select
 from .api.router import OPENAPI_TAGS, router as api_router
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, AuditLog, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
 from .services.reconciliation_service import load_report, reconcile_xlsx, report_xlsx
 from .services.organization_service import InactiveOrderRevisionError, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
@@ -22,6 +22,7 @@ from .services.auth_service import (
     create_initial_admin,
     create_user,
     has_users,
+    update_email,
     update_user,
     verify_password,
 )
@@ -46,10 +47,12 @@ from .services.document_registry_service import application_registry as get_appl
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .services.specialty_service import specialty_registry, update_specialty
 from .services.statistics_service import registry_statistics
+from .services.registry_export_service import applications_xlsx, contracts_xlsx
 from .services.form_validation import (
     AgreementForm,
     ApplicationForm,
     ContractForm,
+    EmailForm,
     FormValidationError,
     OrganizationForm,
     UserCreateForm,
@@ -155,6 +158,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "users": ("/users",),
         "settings": ("/settings",),
         "specialties": ("/specialties",),
+        "import_export": ("/import-export", "/reconciliation"),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -214,6 +218,7 @@ async def require_login(request: Request, call_next):
         return RedirectResponse(destination, status_code=303)
     request.state.user = user
     must_change_password = user.must_change_password
+    must_set_email = not bool(user.email)
     s.close()
     password_change_paths = {
         "/change-password", "/logout", "/api/auth/me",
@@ -226,6 +231,16 @@ async def require_login(request: Request, call_next):
                 status_code=403,
             )
         return RedirectResponse("/change-password", status_code=303)
+    email_paths = {
+        "/set-email", "/logout", "/api/auth/me", "/api/auth/logout", "/api/auth/email",
+    }
+    if must_set_email and path not in email_paths:
+        if path.startswith("/api/"):
+            return JSONResponse(
+                {"detail": "Необходимо указать электронную почту."},
+                status_code=403,
+            )
+        return RedirectResponse("/set-email", status_code=303)
     return await call_next(request)
 
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me-before-production"), https_only=False)
@@ -248,8 +263,10 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         return views.TemplateResponse(request, "login.html", {"error": "Неверный логин или пароль."}, status_code=401)
     request.session["user_id"] = user.id
     must_change_password = user.must_change_password
+    must_set_email = not bool(user.email)
     s.close()
-    return RedirectResponse("/change-password" if must_change_password else "/", status_code=303)
+    destination = "/change-password" if must_change_password else "/set-email" if must_set_email else "/"
+    return RedirectResponse(destination, status_code=303)
 
 @app.get("/logout")
 def logout(request: Request):
@@ -272,10 +289,11 @@ def setup(
     request: Request,
     full_name: str = Form(""),
     username: str = Form(""),
+    email: str = Form(""),
     password: str = Form(""),
     password_repeat: str = Form(""),
 ):
-    validate_form(UserCreateForm, username=username, initial_password=password)
+    validate_form(UserCreateForm, username=username, email=email, initial_password=password)
     session = db()
     if has_users(session):
         session.close()
@@ -283,11 +301,11 @@ def setup(
     try:
         if password != password_repeat:
             raise ValueError("Пароли не совпадают.")
-        create_initial_admin(session, full_name, username, password)
+        create_initial_admin(session, full_name, username, email, password)
     except ValueError as error:
         session.close()
         return views.TemplateResponse(request, "setup.html", {
-            "error": str(error), "full_name": full_name, "username": username,
+            "error": str(error), "full_name": full_name, "username": username, "email": email,
         }, status_code=422)
     session.close()
     return RedirectResponse("/login", status_code=303)
@@ -322,6 +340,30 @@ def save_password(
             "error": str(error), "forced": forced,
         }, status_code=422)
     session.close()
+    session = db()
+    must_set_email = not bool(session.get(AppUser, request.state.user.id).email)
+    session.close()
+    return RedirectResponse("/set-email" if must_set_email else "/", status_code=303)
+
+
+@app.get("/set-email", response_class=HTMLResponse)
+def set_email_form(request: Request):
+    return views.TemplateResponse(request, "set_email.html", {"error": "", "forced": True})
+
+
+@app.post("/set-email", response_class=HTMLResponse)
+def save_required_email(request: Request, email: str = Form("")):
+    session = db()
+    user = session.get(AppUser, request.state.user.id)
+    try:
+        validate_form(EmailForm, email=email)
+        update_email(session, user, email, audit_actor=audit_actor(request))
+    except (FormValidationError, ValueError) as error:
+        session.close()
+        return views.TemplateResponse(request, "set_email.html", {
+            "error": str(error), "forced": True, "email": email,
+        }, status_code=422)
+    session.close()
     return RedirectResponse("/", status_code=303)
 
 
@@ -351,25 +393,26 @@ def add_user(
     request: Request,
     full_name: str = Form(""),
     username: str = Form(""),
+    email: str = Form(""),
     role: str = Form(""),
     initial_password: str = Form(""),
     password_repeat: str = Form(""),
 ):
     require_admin(request)
-    validate_form(UserCreateForm, username=username, initial_password=initial_password)
+    validate_form(UserCreateForm, username=username, email=email, initial_password=initial_password)
     session = db()
     try:
         if initial_password != password_repeat:
             raise ValueError("Пароли не совпадают.")
         create_user(
-            session, full_name, username, role, initial_password,
+            session, full_name, username, email, role, initial_password,
             audit_actor=audit_actor(request),
         )
     except ValueError as error:
         session.close()
         return views.TemplateResponse(request, "user_form.html", {
             "edited_user": None, "error": str(error), "full_name": full_name,
-            "username": username, "selected_role": role,
+            "username": username, "email": email, "selected_role": role,
         }, status_code=422)
     session.close()
     return RedirectResponse("/users", status_code=303)
@@ -411,7 +454,23 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_form(request: Request):
-    return views.TemplateResponse(request, "settings.html", {})
+    return views.TemplateResponse(request, "settings.html", {"email_error": ""})
+
+
+@app.post("/settings/email", response_class=HTMLResponse)
+def save_settings_email(request: Request, email: str = Form("")):
+    session = db()
+    user = session.get(AppUser, request.state.user.id)
+    try:
+        validate_form(EmailForm, email=email)
+        update_email(session, user, email, audit_actor=audit_actor(request))
+    except (FormValidationError, ValueError) as error:
+        session.close()
+        return views.TemplateResponse(request, "settings.html", {
+            "email_error": str(error), "email": email,
+        }, status_code=422)
+    session.close()
+    return RedirectResponse("/settings", status_code=303)
 
 
 @app.get("/specialties", response_class=HTMLResponse)
@@ -559,7 +618,7 @@ def registry(
 def contracts_registry(
     request: Request,
     q: str = "",
-    faculty: str = "",
+    faculty: list[str] = Query(default=[]),
     status: str = "",
     end_year: str = "",
     urgency: str = "",
@@ -571,9 +630,12 @@ def contracts_registry(
     if urgency_choice is not None:
         choice = urgency_choice if urgency_choice in valid_urgencies else ""
         selected = "" if choice == urgency else choice
-        query = urlencode({key: value for key, value in {
-            "q": q, "faculty": faculty, "status": status, "end_year": end_year, "urgency": selected,
-        }.items() if value})
+        query = urlencode([
+            *(("faculty", value) for value in faculty),
+            *((key, value) for key, value in {
+                "q": q, "status": status, "end_year": end_year, "urgency": selected,
+            }.items() if value),
+        ])
         return RedirectResponse(f"/contracts?{query}" if query else "/contracts", status_code=303)
     session = db()
     registry, faculties, end_years, urgency_counts, selected_urgency = get_contract_registry(
@@ -585,9 +647,12 @@ def contracts_registry(
         urgency=urgency,
         page=page,
     )
-    pagination_query = urlencode({key: value for key, value in {
-        "q": q, "faculty": faculty, "status": status, "end_year": end_year, "urgency": selected_urgency,
-    }.items() if value})
+    pagination_query = urlencode([
+        *(("faculty", value) for value in faculty),
+        *((key, value) for key, value in {
+            "q": q, "status": status, "end_year": end_year, "urgency": selected_urgency,
+        }.items() if value),
+    ])
     response = views.TemplateResponse(request, "contracts.html", {
         "registry": registry,
         "faculties": faculties,
@@ -596,35 +661,102 @@ def contracts_registry(
         "urgency_buckets": URGENCY_BUCKETS,
         "urgency_counts": urgency_counts,
         "selected_urgency": selected_urgency,
-        "selected_faculty": faculty,
+        "selected_faculties": faculty,
         "selected_status": status,
         "selected_end_year": end_year,
         "q": q,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+        "export_query": pagination_query,
     })
     session.close()
     return response
 
 
 @app.get("/applications", response_class=HTMLResponse)
-def applications(request: Request, q: str = "", faculty: str = "", status: str = "", urgency: str = "", page: int = 1):
+def applications(request: Request, q: str = "", faculty: list[str] = Query(default=[]), status: str = "", urgency: str = "", page: int = 1):
     urgency = "due_30" if urgency == "due_30" else ""
     session = db()
     registry, faculties = get_application_registry(
         session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=page,
     )
-    pagination_query = urlencode({key: value for key, value in {
-        "q": q, "faculty": faculty, "status": status, "urgency": urgency,
-    }.items() if value})
+    pagination_query = urlencode([
+        *(("faculty", value) for value in faculty),
+        *((key, value) for key, value in {
+            "q": q, "status": status, "urgency": urgency,
+        }.items() if value),
+    ])
     response = views.TemplateResponse(request, "applications.html", {
         "registry": registry,
         "faculties": faculties,
         "statuses": APPLICATION_STATUSES,
         "q": q,
-        "selected_faculty": faculty,
+        "selected_faculties": faculty,
         "selected_status": status,
         "selected_urgency": urgency,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+        "export_query": pagination_query,
+    })
+    session.close()
+    return response
+
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@app.get("/export/contracts")
+def export_contracts(q: str = "", faculty: list[str] = Query(default=[]), status: str = "", end_year: str = "", urgency: str = ""):
+    session = db()
+    registry, *_ = get_contract_registry(
+        session, query_text=q, faculty=faculty, status=status,
+        end_year=end_year, urgency=urgency, page=None,
+    )
+    content = contracts_xlsx(registry, faculty)
+    session.close()
+    return StreamingResponse(content, media_type=XLSX_MEDIA_TYPE, headers={
+        "Content-Disposition": 'attachment; filename="contracts.xlsx"',
+    })
+
+
+@app.get("/export/applications")
+def export_applications(q: str = "", faculty: list[str] = Query(default=[]), status: str = "", urgency: str = ""):
+    session = db()
+    registry, _ = get_application_registry(
+        session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=None,
+    )
+    content = applications_xlsx(registry, faculty)
+    session.close()
+    return StreamingResponse(content, media_type=XLSX_MEDIA_TYPE, headers={
+        "Content-Disposition": 'attachment; filename="applications.xlsx"',
+    })
+
+
+@app.get("/import-export", response_class=HTMLResponse)
+def import_export_page(request: Request, import_notice: str = ""):
+    session = db()
+    result = session.execute(
+        select(AuditLog, AppUser.full_name, AppUser.username)
+        .outerjoin(AppUser, AppUser.id == AuditLog.user_id)
+        .where(AuditLog.action == "FILE_UPLOAD", AuditLog.entity_type == "excel_import")
+        .order_by(AuditLog.timestamp.desc(), AuditLog.id.desc())
+        .limit(10)
+    ).all()
+    history = []
+    for record, full_name, username in result:
+        values = (record.diff or {}).get("new") or {}
+        history.append({
+            "filename": values.get("filename") or record.entity_label.removeprefix("Импорт Excel "),
+            "timestamp": record.timestamp,
+            "employee": full_name or username or "Система",
+            "values": values,
+            "no_changes": not any(values.get(key, 0) for key in (
+                "organizations_created", "organizations_updated",
+                "contracts_created", "contracts_updated",
+                "applications_created", "applications_updated",
+                "order_items_created", "order_items_updated",
+            )),
+        })
+    response = views.TemplateResponse(request, "import_export.html", {
+        "history": history, "import_notice": import_notice,
     })
     session.close()
     return response
@@ -770,7 +902,10 @@ async def upload_import(
         s.close()
         path.unlink(missing_ok=True)
     notice = result.skipped_notice()
-    return RedirectResponse(f"/?{urlencode({'import_notice': notice})}" if notice else "/", status_code=303)
+    return RedirectResponse(
+        f"/import-export?{urlencode({'import_notice': notice})}" if notice else "/import-export",
+        status_code=303,
+    )
 
 @app.post("/reconciliation", response_class=HTMLResponse)
 async def reconcile_with_ais(request: Request, file: UploadFile = File(...)):
@@ -809,9 +944,9 @@ def export_reconciliation(token: str):
 def new_org(request: Request): return views.TemplateResponse(request, "organization_form.html", {})
 
 @app.post("/organizations/new")
-def create_org(request: Request, name: str = Form(""), unp: str = Form(""), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
-    validate_form(OrganizationForm, name=name, unp=unp)
-    s = db(); org = create_organization(s, name=name, unp=unp, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
+def create_org(request: Request, name: str = Form(""), full_name: str = Form(""), address: str = Form(""), department: str = Form(""), phone: str = Form("")):
+    validate_form(OrganizationForm, name=name)
+    s = db(); org = create_organization(s, name=name, full_name=full_name, address=address, department=department, phone=phone, audit_actor=audit_actor(request))
     org_id = org.id
     s.close()
     return RedirectResponse(f"/organizations/{org_id}", status_code=303)

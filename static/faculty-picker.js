@@ -21,7 +21,7 @@ document.querySelectorAll('.faculty-multiselect').forEach((picker) => {
 
   const refreshSummary = () => {
     const selected = inputs.filter((input) => input.checked);
-    if (!selected.length) summary.textContent = 'Выберите факультеты';
+    if (!selected.length) summary.textContent = picker.dataset.optional ? 'Все факультеты' : 'Выберите факультеты';
     else if (selected.length === 1) summary.textContent = selected[0].value;
     else summary.textContent = `${selected[0].value} + ещё ${selected.length - 1}`;
   };
@@ -48,7 +48,7 @@ document.querySelectorAll('.faculty-multiselect').forEach((picker) => {
   inputs.forEach((input) => input.addEventListener('change', refreshSummary));
   search.addEventListener('input', filterAndRank);
   picker.closest('form').addEventListener('submit', (event) => {
-    if (!inputs.some((input) => input.checked)) {
+    if (!picker.dataset.optional && !inputs.some((input) => input.checked)) {
       event.preventDefault();
       picker.open = true;
       summary.textContent = 'Выберите хотя бы один факультет';

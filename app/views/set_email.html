@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Электронная почта — Кадровый заказ</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/forms.css">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="brand">◈ <b>Кадровый заказ</b></div>
+    <h1>Укажите электронную почту</h1>
+    <p class="notice">Перед продолжением работы заполните адрес своей учётной записи.</p>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post" action="/set-email" class="account-form">
+      <label>Электронная почта<input name="email" type="email" value="{{ email|default('') }}" autocomplete="email" required autofocus></label>
+      <button class="button">Сохранить и продолжить</button>
+    </form>
+  </main>
+</body>
+</html>

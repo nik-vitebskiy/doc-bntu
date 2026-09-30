@@ -8,6 +8,13 @@
   <dl>
     <dt>ФИО сотрудника</dt><dd>{{ request.state.user.full_name or '—' }}</dd>
     <dt>Логин</dt><dd>{{ request.state.user.username }}</dd>
+    <dt>Электронная почта</dt><dd>
+      {% if email_error %}<p class="error">{{ email_error }}</p>{% endif %}
+      <form method="post" action="/settings/email" class="inlineform">
+        <input name="email" type="email" value="{{ email|default(request.state.user.email or '') }}" autocomplete="email" required>
+        <button class="secondary-button">Сохранить</button>
+      </form>
+    </dd>
     <dt>Роль</dt><dd>{{ 'Администратор' if request.state.user.role == 'ADMIN' else 'Руководитель отдела' }}</dd>
   </dl>
 </section>
