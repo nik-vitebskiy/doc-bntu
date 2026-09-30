@@ -324,7 +324,7 @@ p{
   color:#795a09
 }
 
-.urgency-toggle.urgency-later.active{
+.urgency-toggle.urgency-due_over.active{
   border-color:#71bc91;
   background:#dff4e8;
   color:#14733d

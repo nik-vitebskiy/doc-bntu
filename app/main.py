@@ -673,26 +673,45 @@ def contracts_registry(
 
 
 @app.get("/applications", response_class=HTMLResponse)
-def applications(request: Request, q: str = "", faculty: list[str] = Query(default=[]), status: str = "", urgency: str = "", page: int = 1):
-    urgency = "due_30" if urgency == "due_30" else ""
+def applications(
+    request: Request, q: str = "", faculty: list[str] = Query(default=[]), status: str = "",
+    end_year: str = "", urgency: str = "", urgency_choice: str | None = None, page: int = 1,
+):
+    valid_urgencies = {key for key, _label in URGENCY_BUCKETS}
+    urgency = urgency if urgency in valid_urgencies else ""
+    if urgency_choice is not None:
+        choice = urgency_choice if urgency_choice in valid_urgencies else ""
+        selected = "" if choice == urgency else choice
+        query = urlencode([
+            *(("faculty", value) for value in faculty),
+            *((key, value) for key, value in {
+                "q": q, "status": status, "end_year": end_year, "urgency": selected,
+            }.items() if value),
+        ])
+        return RedirectResponse(f"/applications?{query}" if query else "/applications", status_code=303)
     session = db()
-    registry, faculties = get_application_registry(
-        session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=page,
+    registry, faculties, end_years, urgency_counts, selected_urgency = get_application_registry(
+        session, query_text=q, faculty=faculty, status=status, end_year=end_year,
+        urgency=urgency, page=page,
     )
     pagination_query = urlencode([
         *(("faculty", value) for value in faculty),
         *((key, value) for key, value in {
-            "q": q, "status": status, "urgency": urgency,
+            "q": q, "status": status, "end_year": end_year, "urgency": selected_urgency,
         }.items() if value),
     ])
     response = views.TemplateResponse(request, "applications.html", {
         "registry": registry,
         "faculties": faculties,
         "statuses": APPLICATION_STATUSES,
+        "end_years": end_years,
+        "urgency_buckets": URGENCY_BUCKETS,
+        "urgency_counts": urgency_counts,
         "q": q,
         "selected_faculties": faculty,
         "selected_status": status,
-        "selected_urgency": urgency,
+        "selected_end_year": end_year,
+        "selected_urgency": selected_urgency,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
         "export_query": pagination_query,
     })
@@ -718,10 +737,14 @@ def export_contracts(q: str = "", faculty: list[str] = Query(default=[]), status
 
 
 @app.get("/export/applications")
-def export_applications(q: str = "", faculty: list[str] = Query(default=[]), status: str = "", urgency: str = ""):
+def export_applications(
+    q: str = "", faculty: list[str] = Query(default=[]), status: str = "",
+    end_year: str = "", urgency: str = "",
+):
     session = db()
-    registry, _ = get_application_registry(
-        session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=None,
+    registry, *_ = get_application_registry(
+        session, query_text=q, faculty=faculty, status=status, end_year=end_year,
+        urgency=urgency, page=None,
     )
     content = applications_xlsx(registry, faculty)
     session.close()

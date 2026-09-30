@@ -86,7 +86,7 @@ def test_statistics_counts_unique_documents_and_respects_faculty_context(session
 
     filtered = registry_statistics(session, faculty_a.id, today=today, now=now)
     contract_rows, *_ = registry(session, faculty=faculty_a.name)
-    application_page, _ = application_registry(session, faculty=faculty_a.name)
+    application_page, *_ = application_registry(session, faculty=faculty_a.name)
     assert filtered.total_organizations == 3
     assert filtered.total_contracts == len(contract_rows) == 2
     assert filtered.total_applications == application_page.total == 2
@@ -111,5 +111,5 @@ def test_application_attention_filter_includes_overdue_and_due_dates_only(sessio
     _application(session, organization, faculty, specialty, "NO-DATE", "Заявка", None, datetime.now(timezone.utc))
     session.commit()
 
-    page, _ = application_registry(session, urgency="due_30")
+    page, *_ = application_registry(session, urgency="due_30")
     assert {row.number for row in page.rows} == {"OVERDUE", "DUE"}
