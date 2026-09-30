@@ -3,6 +3,9 @@ from io import BytesIO
 from openpyxl import Workbook
 
 
+YEARS = tuple(range(2026, 2037))
+
+
 def _workbook(title: str, headers: list[str], rows: list[list[object]]) -> BytesIO:
     workbook = Workbook()
     sheet = workbook.active
@@ -21,39 +24,59 @@ def _workbook(title: str, headers: list[str], rows: list[list[object]]) -> Bytes
     return output
 
 
-def contracts_xlsx(registry) -> BytesIO:
+def _demands(item) -> list[object]:
+    values = {row.year: row.quantity for row in item.annual_demands}
+    return [values.get(year, "—") for year in YEARS]
+
+
+def contracts_xlsx(registry, faculty: str = "") -> BytesIO:
     rows = []
     for entry in registry.rows:
         contract = entry.contract
-        rows.append([
-            contract.organization.name,
-            f"{contract.number or ''} от {contract.start_date.strftime('%d.%m.%Y')}",
-            ", ".join(contract.faculty_names),
-            entry.effective_status,
-            contract.end_date.strftime("%d.%m.%Y") if contract.end_date else "",
-            "Есть" if contract.has_signed_scan else "Нет",
-            ", ".join(contract.specialty_codes),
-        ])
+        for item in contract.items:
+            faculty_name = item.faculty.name if item.faculty else ""
+            if faculty and faculty_name != faculty:
+                continue
+            rows.append([
+                faculty_name,
+                contract.organization.name,
+                f"№{contract.number or ''} от {contract.start_date.strftime('%d.%m.%Y')}",
+                entry.effective_status,
+                contract.start_date.strftime("%d.%m.%Y"),
+                contract.end_date.strftime("%d.%m.%Y") if contract.end_date else "",
+                item.specialty,
+                item.qualification,
+                item.profile or "",
+                *_demands(item),
+            ])
     return _workbook("Договоры", [
-        "Организация", "Номер и дата договора", "Факультеты", "Статус",
-        "Дата окончания", "Скан подписанного", "Специальности",
+        "Факультет", "Организация", "Номер и дата договора", "Статус",
+        "Дата начала", "Дата окончания", "Код специальности",
+        "Квалификация", "Профилизация", *map(str, YEARS),
     ], rows)
 
 
-def applications_xlsx(registry) -> BytesIO:
+def applications_xlsx(registry, faculty: str = "") -> BytesIO:
     rows = []
     for application in registry.rows:
-        rows.append([
-            application.number or "",
-            application.organization.name,
-            application.date_end.strftime("%d.%m.%Y") if application.date_end else "",
-            application.signed_date.strftime("%d.%m.%Y") if application.signed_date else "",
-            ", ".join(application.faculty_names),
-            application.status,
-            "Есть" if application.has_signed_scan else "Нет",
-            ", ".join(dict.fromkeys(item.specialty for item in application.items)),
-        ])
+        for item in application.items:
+            faculty_name = item.faculty.name if item.faculty else ""
+            if faculty and faculty_name != faculty:
+                continue
+            rows.append([
+                faculty_name,
+                application.organization.name,
+                application.number or "",
+                application.status,
+                application.signed_date.strftime("%d.%m.%Y") if application.signed_date else "",
+                application.date_end.strftime("%d.%m.%Y") if application.date_end else "",
+                item.specialty,
+                item.qualification,
+                item.profile or "",
+                *_demands(item),
+            ])
     return _workbook("Заявки", [
-        "Номер заявки", "Организация", "Действует до", "Дата подписания",
-        "Факультеты", "Статус", "Скан подписанной заявки", "Специальности",
+        "Факультет", "Организация", "Номер заявки", "Статус",
+        "Дата подписания", "Действует до", "Код специальности",
+        "Квалификация", "Профилизация", *map(str, YEARS),
     ], rows)

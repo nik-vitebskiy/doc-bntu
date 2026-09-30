@@ -1511,6 +1511,9 @@ curl -b cookies.txt \
 Ответ `200 OK`: MIME-тип
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, заголовок
 `Content-Disposition: attachment; filename="contracts.xlsx"` и бинарный XLSX.
+Одна строка соответствует одной строке кадрового заказа: факультет,
+организация, номер и даты документа, статус, код специальности,
+квалификация, профилизация и потребность по годам 2026–2036.
 
 #### `GET /export/applications`
 
@@ -1523,7 +1526,8 @@ curl -b cookies.txt \
   "http://localhost:8000/export/applications?faculty=Автотракторный&status=Заявка&urgency=due_30"
 ```
 
-Ответ имеет тот же MIME-тип; имя файла — `applications.xlsx`. Для обоих
+Ответ имеет тот же построчный формат кадрового заказа и MIME-тип; имя файла —
+`applications.xlsx`. Для обоих
 экспортов ошибки: `401`; `422` — неверный фильтр.
 
 ### 2.11. Проверка доступности

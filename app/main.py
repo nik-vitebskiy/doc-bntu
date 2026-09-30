@@ -644,7 +644,7 @@ def export_contracts(q: str = "", faculty: str = "", status: str = "", end_year:
         session, query_text=q, faculty=faculty, status=status,
         end_year=end_year, urgency=urgency, page=None,
     )
-    content = contracts_xlsx(registry)
+    content = contracts_xlsx(registry, faculty)
     session.close()
     return StreamingResponse(content, media_type=XLSX_MEDIA_TYPE, headers={
         "Content-Disposition": 'attachment; filename="contracts.xlsx"',
@@ -657,7 +657,7 @@ def export_applications(q: str = "", faculty: str = "", status: str = "", urgenc
     registry, _ = get_application_registry(
         session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=None,
     )
-    content = applications_xlsx(registry)
+    content = applications_xlsx(registry, faculty)
     session.close()
     return StreamingResponse(content, media_type=XLSX_MEDIA_TYPE, headers={
         "Content-Disposition": 'attachment; filename="applications.xlsx"',

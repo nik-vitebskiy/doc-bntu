@@ -128,6 +128,8 @@ def contract_registry(
             joinedload(Contract.organization),
             selectinload(Contract.faculty_links).selectinload(ContractFaculty.faculty),
             selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.specialty_ref),
+            selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.faculty),
+            selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.annual_demands),
             selectinload(Contract.agreements).selectinload(AdditionalAgreement.documents).selectinload(Document.attachments),
             selectinload(Contract.documents).selectinload(Document.attachments),
         )
@@ -194,6 +196,8 @@ def application_registry(
             selectinload(Application.faculty_links).selectinload(ApplicationFaculty.faculty),
             selectinload(Application.documents).selectinload(Document.attachments),
             selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.specialty_ref),
+            selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.faculty),
+            selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.annual_demands),
         )
         .order_by(Application.signed_date.desc().nullslast(), Application.id.desc())
     )

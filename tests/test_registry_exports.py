@@ -24,7 +24,10 @@ def test_contract_export_uses_registry_filters_and_full_export_has_all(
     closed.status = "Закрыт"
     session.commit()
     save_item(session, contract.id, "EXP-01", "", {
-        "faculty_id": str(contract.faculty_links[0].faculty_id), "demand_2027": "1",
+        "faculty_id": str(contract.faculty_links[0].faculty_id), "profile": "Профиль 1", "demand_2027": "1",
+    }, user_id=user.id, audit_actor=actor)
+    save_item(session, closed.id, "EXP-02", "", {
+        "faculty_id": str(closed.faculty_links[0].faculty_id), "demand_2027": "3",
     }, user_id=user.id, audit_actor=actor)
 
     full = client.get("/export/contracts")
@@ -37,8 +40,15 @@ def test_contract_export_uses_registry_filters_and_full_export_has_all(
     assert len(_rows(full)) == 3
     filtered_rows = _rows(filtered)
     assert len(filtered_rows) == 2
-    assert contract.number in filtered_rows[1][1]
+    assert filtered_rows[0][:9] == (
+        "Факультет", "Организация", "Номер и дата договора", "Статус",
+        "Дата начала", "Дата окончания", "Код специальности", "Квалификация", "Профилизация",
+    )
+    assert contract.number in filtered_rows[1][2]
     assert filtered_rows[1][6] == "EXP-01"
+    assert filtered_rows[1][8] == "Профиль 1"
+    assert filtered_rows[1][9] == "—"
+    assert filtered_rows[1][10] == 1
 
 
 def test_application_export_uses_filters_and_contains_specialty_codes(
@@ -51,7 +61,10 @@ def test_application_export_uses_filters_and_contains_specialty_codes(
     closed.status = "Закрыт"
     session.commit()
     save_application_item(session, active, "APP-SPEC", "", {
-        "faculty_id": str(active.faculty_links[0].faculty_id), "demand_2027": "2",
+        "faculty_id": str(active.faculty_links[0].faculty_id), "profile": "Профиль заявки", "demand_2027": "2",
+    }, audit_actor=actor)
+    save_application_item(session, closed, "APP-CLOSED", "", {
+        "faculty_id": str(closed.faculty_links[0].faculty_id), "demand_2027": "4",
     }, audit_actor=actor)
 
     full = _rows(client.get("/export/applications"))
@@ -60,8 +73,14 @@ def test_application_export_uses_filters_and_contains_specialty_codes(
     }))
     assert len(full) == 3
     assert len(filtered) == 2
-    assert filtered[1][0] == "APP-A"
-    assert filtered[1][7] == "APP-SPEC"
+    assert filtered[0][:9] == (
+        "Факультет", "Организация", "Номер заявки", "Статус",
+        "Дата подписания", "Действует до", "Код специальности", "Квалификация", "Профилизация",
+    )
+    assert filtered[1][2] == "APP-A"
+    assert filtered[1][6] == "APP-SPEC"
+    assert filtered[1][8] == "Профиль заявки"
+    assert filtered[1][10] == 2
 
 
 def test_import_export_page_has_history_controls_and_registry_is_clean(client, session, user):
