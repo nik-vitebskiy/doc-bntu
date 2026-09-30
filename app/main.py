@@ -682,6 +682,12 @@ def import_export_page(request: Request, import_notice: str = ""):
             "timestamp": record.timestamp,
             "employee": full_name or username or "Система",
             "values": values,
+            "no_changes": not any(values.get(key, 0) for key in (
+                "organizations_created", "organizations_updated",
+                "contracts_created", "contracts_updated",
+                "applications_created", "applications_updated",
+                "order_items_created", "order_items_updated",
+            )),
         })
     response = views.TemplateResponse(request, "import_export.html", {
         "history": history, "import_notice": import_notice,

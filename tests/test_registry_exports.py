@@ -71,12 +71,26 @@ def test_import_export_page_has_history_controls_and_registry_is_clean(client, s
         diff={"old": {}, "new": {"filename": "history.xlsx", "rows_processed": 12, "organizations": 2, "contracts_created": 1}},
         timestamp=datetime(2026, 9, 30, 9, 15, tzinfo=timezone.utc),
     ))
+    session.add(AuditLog(
+        user_id=user.id, action="FILE_UPLOAD", entity_type="excel_import",
+        entity_label="Импорт Excel unchanged.xlsx",
+        diff={"old": {}, "new": {
+            "filename": "unchanged.xlsx", "rows_processed": 0,
+            "organizations_created": 0, "organizations_updated": 0,
+            "contracts_created": 0, "contracts_updated": 0,
+            "applications_created": 0, "applications_updated": 0,
+            "order_items_created": 0, "order_items_updated": 0,
+        }},
+        timestamp=datetime(2026, 9, 30, 9, 16, tzinfo=timezone.utc),
+    ))
     session.commit()
 
     page = client.get("/import-export")
     assert page.status_code == 200
     assert "history.xlsx" in page.text
     assert "Строк: 12" in page.text
+    assert "договоры — создано: 1, обновлено: 0" in page.text
+    assert "unchanged.xlsx" in page.text and "Изменений нет." in page.text
     assert 'action="/import"' in page.text and 'action="/reconciliation"' in page.text
     assert 'href="/export/contracts"' in page.text and 'href="/export/applications"' in page.text
     assert 'data-persist-checkbox="import-export:create-organizations:user:' in page.text

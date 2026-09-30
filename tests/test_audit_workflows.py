@@ -275,8 +275,14 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
         "filename": "web-import.xlsx",
         "rows_processed": 1,
         "organizations": 1,
+        "organizations_created": 1,
+        "organizations_updated": 0,
         "contracts_created": 1,
+        "contracts_updated": 0,
+        "applications_created": 0,
+        "applications_updated": 0,
         "order_items_created": 1,
+        "order_items_updated": 0,
         "faculty_links_created": 1,
     }
     rendered_import = get_audit_registry(session, action="FILE_UPLOAD", query="web-import").rows[0]
@@ -285,8 +291,14 @@ def test_excel_import_records_current_user_and_system(session, client, tmp_path)
         "Имя файла",
         "Обработано строк",
         "Загружено организаций",
+        "Создано организаций",
+        "Обновлено организаций",
         "Создано договоров",
+        "Обновлено договоров",
+        "Создано заявок",
+        "Обновлено заявок",
         "Добавлено строк заказа",
+        "Обновлено строк заказа",
         "Связано факультетов",
     ]
     assert "Поле" not in rendered_labels

@@ -73,3 +73,4 @@ def test_repeated_application_import_is_idempotent(session, user, tmp_path):
     assert counts_after == counts_before
     assert first.rows_processed == second.rows_processed == 4
     assert (second.organizations_created, second.applications_created, second.order_items_created) == (0, 0, 0)
+    assert (second.organizations_updated, second.applications_updated, second.order_items_updated) == (2, 3, 4)

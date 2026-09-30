@@ -73,6 +73,7 @@ def test_import_creates_one_shared_contract_and_repeat_is_idempotent(session, us
     second = import_xlsx(session, path, user.id)
     assert second.rows_processed == 60
     assert (second.organizations_created, second.contracts_created, second.faculty_links_created, second.order_items_created) == (0, 0, 0, 0)
+    assert (second.organizations_updated, second.contracts_updated, second.order_items_updated) == (1, 1, 60)
     assert _counts(session) == {
         "organization": 1, "contract": 1, "contract_faculty": 11,
         "order_item": 60, "annual_demand": 120,
