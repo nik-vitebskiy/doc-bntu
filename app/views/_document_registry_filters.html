@@ -18,6 +18,7 @@
     <label class="urgency-toggle urgency-due_30{{ ' active' if selected_urgency == 'due_30' }}"><input type="checkbox" name="urgency" value="due_30" {{ 'checked' if selected_urgency == 'due_30' }}> ≤ 30 дней</label>
   {% endif %}
   <button>Фильтровать</button>
+  <a class="button secondary" href="/export/{{ registry_kind }}{% if export_query %}?{{ export_query }}{% endif %}">Экспорт</a>
   {% if registry_kind == 'contracts' %}
     <div class="urgency-filters" aria-label="Срок окончания договора">
       {% for key, label in urgency_buckets %}<button type="submit" name="urgency_choice" value="{{ key }}" class="urgency-toggle urgency-{{ key }}{{ ' active' if selected_urgency == key }}" aria-pressed="{{ 'true' if selected_urgency == key else 'false' }}">{{ label }} <span>{{ urgency_counts.get(key, 0) }}</span></button>{% endfor %}

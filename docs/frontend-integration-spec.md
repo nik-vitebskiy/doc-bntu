@@ -254,6 +254,15 @@ HTML-маршрутами без `/api`: HTML-маршруты возвраща�
 Не использовать общие маршруты `/api/export` или `/export`: таких контрактов
 нет и не будет.
 
+#### Страница «Импорт/Экспорт» — DRAFT
+
+Отдельный пункт меню содержит: загрузку Excel, чекбокс «Создавать
+новые организации из файла» с хранением в `localStorage`, загрузку файла
+для сверки с АИС, последние 10 импортов и кнопки полного экспорта
+договоров/заявок. Кнопка «Экспорт» в каждом реестре передаёт все
+активные фильтры; кнопки на отдельной странице вызывают те же маршруты
+без параметров.
+
 ### 1.5. Импорт Excel
 
 #### `frontend/src/shared/api/client.ts`
@@ -1489,14 +1498,14 @@ GET /api/statistics?faculty_id=1
 
 #### `GET /export/contracts`
 
-Доступ: обе роли. Параметры совпадают с `GET /api/contracts`: `q`,
-`faculty_id`, `status`, `end_year`, `urgency`. Экспортируется вся текущая
+Доступ: обе роли. Параметры Jinja-реестра: `q`, `faculty` (название),
+`status`, `end_year`, `urgency`. Экспортируется вся текущая
 выборка без пагинации.
 
 ```bash
 curl -b cookies.txt \
   --output contracts.xlsx \
-  "http://localhost:8000/export/contracts?faculty_id=1&status=Активен"
+  "http://localhost:8000/export/contracts?faculty=Автотракторный&status=Активен&end_year=2030&urgency=due_30"
 ```
 
 Ответ `200 OK`: MIME-тип
@@ -1505,13 +1514,13 @@ curl -b cookies.txt \
 
 #### `GET /export/applications`
 
-Доступ: обе роли. Параметры совпадают с `GET /api/applications`: `q`,
-`faculty_id`, `status`. Экспортируется вся текущая выборка без пагинации.
+Доступ: обе роли. Параметры Jinja-реестра: `q`, `faculty` (название),
+`status`, `urgency`. Экспортируется вся текущая выборка без пагинации.
 
 ```bash
 curl -b cookies.txt \
   --output applications.xlsx \
-  "http://localhost:8000/export/applications?faculty_id=1&status=Заявка"
+  "http://localhost:8000/export/applications?faculty=Автотракторный&status=Заявка&urgency=due_30"
 ```
 
 Ответ имеет тот же MIME-тип; имя файла — `applications.xlsx`. Для обоих

@@ -10,9 +10,9 @@ from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import func
+from sqlalchemy import func, select
 from .api.router import OPENAPI_TAGS, router as api_router
-from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, DocumentAttachment, Faculty, Specialty
+from .models import SessionLocal, Organization, Contract, OrderItem, AppUser, AdditionalAgreement, Application, AuditLog, DocumentAttachment, Faculty, Specialty
 from .services.import_service import import_xlsx
 from .services.reconciliation_service import load_report, reconcile_xlsx, report_xlsx
 from .services.organization_service import InactiveOrderRevisionError, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
@@ -46,6 +46,7 @@ from .services.document_registry_service import application_registry as get_appl
 from .services.status_service import APPLICATION_STATUSES, CONTRACT_STATUSES, URGENCY_BUCKETS, expiry_urgency, order_change_class, status_class, status_label
 from .services.specialty_service import specialty_registry, update_specialty
 from .services.statistics_service import registry_statistics
+from .services.registry_export_service import applications_xlsx, contracts_xlsx
 from .services.form_validation import (
     AgreementForm,
     ApplicationForm,
@@ -155,6 +156,7 @@ def nav_is_active(request: Request, section: str) -> bool:
         "users": ("/users",),
         "settings": ("/settings",),
         "specialties": ("/specialties",),
+        "import_export": ("/import-export", "/reconciliation"),
     }
     return (section == "organizations" and path == "/") or path.startswith(prefixes[section])
 
@@ -601,6 +603,7 @@ def contracts_registry(
         "selected_end_year": end_year,
         "q": q,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+        "export_query": pagination_query,
     })
     session.close()
     return response
@@ -625,6 +628,63 @@ def applications(request: Request, q: str = "", faculty: str = "", status: str =
         "selected_status": status,
         "selected_urgency": urgency,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
+        "export_query": pagination_query,
+    })
+    session.close()
+    return response
+
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@app.get("/export/contracts")
+def export_contracts(q: str = "", faculty: str = "", status: str = "", end_year: str = "", urgency: str = ""):
+    session = db()
+    registry, *_ = get_contract_registry(
+        session, query_text=q, faculty=faculty, status=status,
+        end_year=end_year, urgency=urgency, page=None,
+    )
+    content = contracts_xlsx(registry)
+    session.close()
+    return StreamingResponse(content, media_type=XLSX_MEDIA_TYPE, headers={
+        "Content-Disposition": 'attachment; filename="contracts.xlsx"',
+    })
+
+
+@app.get("/export/applications")
+def export_applications(q: str = "", faculty: str = "", status: str = "", urgency: str = ""):
+    session = db()
+    registry, _ = get_application_registry(
+        session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=None,
+    )
+    content = applications_xlsx(registry)
+    session.close()
+    return StreamingResponse(content, media_type=XLSX_MEDIA_TYPE, headers={
+        "Content-Disposition": 'attachment; filename="applications.xlsx"',
+    })
+
+
+@app.get("/import-export", response_class=HTMLResponse)
+def import_export_page(request: Request, import_notice: str = ""):
+    session = db()
+    result = session.execute(
+        select(AuditLog, AppUser.full_name, AppUser.username)
+        .outerjoin(AppUser, AppUser.id == AuditLog.user_id)
+        .where(AuditLog.action == "FILE_UPLOAD", AuditLog.entity_type == "excel_import")
+        .order_by(AuditLog.timestamp.desc(), AuditLog.id.desc())
+        .limit(10)
+    ).all()
+    history = []
+    for record, full_name, username in result:
+        values = (record.diff or {}).get("new") or {}
+        history.append({
+            "filename": values.get("filename") or record.entity_label.removeprefix("Импорт Excel "),
+            "timestamp": record.timestamp,
+            "employee": full_name or username or "Система",
+            "values": values,
+        })
+    response = views.TemplateResponse(request, "import_export.html", {
+        "history": history, "import_notice": import_notice,
     })
     session.close()
     return response
@@ -770,7 +830,10 @@ async def upload_import(
         s.close()
         path.unlink(missing_ok=True)
     notice = result.skipped_notice()
-    return RedirectResponse(f"/?{urlencode({'import_notice': notice})}" if notice else "/", status_code=303)
+    return RedirectResponse(
+        f"/import-export?{urlencode({'import_notice': notice})}" if notice else "/import-export",
+        status_code=303,
+    )
 
 @app.post("/reconciliation", response_class=HTMLResponse)
 async def reconcile_with_ais(request: Request, file: UploadFile = File(...)):
