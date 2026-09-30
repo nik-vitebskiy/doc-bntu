@@ -49,6 +49,11 @@ def test_contract_export_uses_registry_filters_and_full_export_has_all(
     assert filtered_rows[1][8] == "Профиль 1"
     assert filtered_rows[1][9] == "—"
     assert filtered_rows[1][10] == 1
+    multi_rows = _rows(client.get("/export/contracts", params=[
+        ("faculty", contract.faculty_links[0].faculty.name),
+        ("faculty", closed.faculty_links[0].faculty.name),
+    ]))
+    assert {row[6] for row in multi_rows[1:]} == {"EXP-01", "EXP-02"}
 
 
 def test_application_export_uses_filters_and_contains_specialty_codes(
@@ -81,6 +86,14 @@ def test_application_export_uses_filters_and_contains_specialty_codes(
     assert filtered[1][6] == "APP-SPEC"
     assert filtered[1][8] == "Профиль заявки"
     assert filtered[1][10] == 2
+    other = create_application(session, organization.id, ["Другой факультет заявок"], "APP-B", "2026-09-03", active_end.isoformat(), user.id, audit_actor=actor)
+    save_application_item(session, other, "APP-OTHER", "", {
+        "faculty_id": str(other.faculty_links[0].faculty_id), "demand_2027": "5",
+    }, audit_actor=actor)
+    multi = _rows(client.get("/export/applications", params=[
+        ("faculty", "Факультет заявок"), ("faculty", "Другой факультет заявок"),
+    ]))
+    assert {row[6] for row in multi[1:]} == {"APP-SPEC", "APP-CLOSED", "APP-OTHER"}
 
 
 def test_import_export_page_has_history_controls_and_registry_is_clean(client, session, user):
@@ -120,9 +133,10 @@ def test_import_export_page_has_history_controls_and_registry_is_clean(client, s
 
 
 def test_registry_export_links_preserve_active_filters(client):
-    contracts = client.get("/contracts", params={"q": "ABC", "status": "Активен", "end_year": "2030", "urgency": "due_30"})
+    contracts = client.get("/contracts", params=[("q", "ABC"), ("faculty", "Факультет A"), ("faculty", "Факультет B"), ("status", "Активен"), ("end_year", "2030"), ("urgency", "due_30")])
     applications = client.get("/applications", params={"q": "APP", "status": "Заявка", "urgency": "due_30"})
     assert "/export/contracts?" in contracts.text
     assert "q=ABC" in contracts.text and "end_year=2030" in contracts.text and "urgency=due_30" in contracts.text
+    assert contracts.text.count("faculty=") >= 2
     assert "/export/applications?" in applications.text
     assert "q=APP" in applications.text and "urgency=due_30" in applications.text

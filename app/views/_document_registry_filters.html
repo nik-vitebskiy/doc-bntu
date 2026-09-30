@@ -1,9 +1,6 @@
 <form class="filters registry-filters" method="get" action="/{{ registry_kind }}">
   <input name="q" value="{{ q }}" placeholder="Организация или номер {{ registry_item_genitive }}">
-  <select name="faculty">
-    <option value="">Все факультеты</option>
-    {% for faculty in faculties %}<option value="{{ faculty }}" {{ 'selected' if faculty == selected_faculty }}>{{ faculty }}</option>{% endfor %}
-  </select>
+  <div class="faculty-picker"><details class="faculty-multiselect" data-optional="true"><summary><span class="faculty-summary">Все факультеты</span><span class="chevron">⌄</span></summary><div class="faculty-menu"><input class="faculty-search" type="search" placeholder="Поиск факультета" autocomplete="off"><div class="faculty-options">{% for faculty in faculties %}<label data-faculty-option><input type="checkbox" name="faculty" value="{{ faculty }}" {{ 'checked' if faculty in selected_faculties }}><span>{{ faculty }}</span></label>{% endfor %}</div></div></details></div>
   <select name="status">
     <option value="">Все статусы</option>
     {% for status in statuses %}<option value="{{ status }}" {{ 'selected' if status == selected_status }}>{{ status }}</option>{% endfor %}

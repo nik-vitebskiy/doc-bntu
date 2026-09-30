@@ -56,7 +56,11 @@ def _page(total: int, requested: int) -> tuple[int, int, int]:
     return page, pages, (page - 1) * PAGE_SIZE
 
 
-def _contract_base_conditions(query_text: str, faculty: str, status: str, end_year: str):
+def _faculty_names(faculty: str | list[str]) -> list[str]:
+    return [faculty] if isinstance(faculty, str) and faculty else [value for value in faculty if value]
+
+
+def _contract_base_conditions(query_text: str, faculty: str | list[str], status: str, end_year: str):
     conditions = []
     needle = query_text.strip()
     if needle:
@@ -66,10 +70,11 @@ def _contract_base_conditions(query_text: str, faculty: str, status: str, end_ye
             Organization.full_name.ilike(pattern),
             Contract.number.ilike(pattern),
         ))
-    if faculty:
+    selected_faculties = _faculty_names(faculty)
+    if selected_faculties:
         conditions.append(exists(select(ContractFaculty.contract_id).join(Faculty).where(
             ContractFaculty.contract_id == Contract.id,
-            Faculty.name == faculty,
+            Faculty.name.in_(selected_faculties),
         )))
     active_agreement = exists(select(AdditionalAgreement.id).where(
         AdditionalAgreement.contract_id == Contract.id,
@@ -99,7 +104,7 @@ def contract_registry(
     session: Session,
     *,
     query_text: str = "",
-    faculty: str = "",
+    faculty: str | list[str] = "",
     status: str = "",
     end_year: str = "",
     urgency: str = "",
@@ -161,7 +166,7 @@ def application_registry(
     session: Session,
     *,
     query_text: str = "",
-    faculty: str = "",
+    faculty: str | list[str] = "",
     status: str = "",
     urgency: str = "",
     page: int | None = 1,
@@ -175,10 +180,11 @@ def application_registry(
             Organization.full_name.ilike(pattern),
             Application.number.ilike(pattern),
         ))
-    if faculty:
+    selected_faculties = _faculty_names(faculty)
+    if selected_faculties:
         conditions.append(exists(select(ApplicationFaculty.application_id).join(Faculty).where(
             ApplicationFaculty.application_id == Application.id,
-            Faculty.name == faculty,
+            Faculty.name.in_(selected_faculties),
         )))
     if status in APPLICATION_STATUSES:
         conditions.append(Application.status == status)

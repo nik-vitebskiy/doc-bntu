@@ -2,7 +2,7 @@ import json, logging, os, tempfile
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote, urlencode
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
@@ -561,7 +561,7 @@ def registry(
 def contracts_registry(
     request: Request,
     q: str = "",
-    faculty: str = "",
+    faculty: list[str] = Query(default=[]),
     status: str = "",
     end_year: str = "",
     urgency: str = "",
@@ -573,9 +573,12 @@ def contracts_registry(
     if urgency_choice is not None:
         choice = urgency_choice if urgency_choice in valid_urgencies else ""
         selected = "" if choice == urgency else choice
-        query = urlencode({key: value for key, value in {
-            "q": q, "faculty": faculty, "status": status, "end_year": end_year, "urgency": selected,
-        }.items() if value})
+        query = urlencode([
+            *(("faculty", value) for value in faculty),
+            *((key, value) for key, value in {
+                "q": q, "status": status, "end_year": end_year, "urgency": selected,
+            }.items() if value),
+        ])
         return RedirectResponse(f"/contracts?{query}" if query else "/contracts", status_code=303)
     session = db()
     registry, faculties, end_years, urgency_counts, selected_urgency = get_contract_registry(
@@ -587,9 +590,12 @@ def contracts_registry(
         urgency=urgency,
         page=page,
     )
-    pagination_query = urlencode({key: value for key, value in {
-        "q": q, "faculty": faculty, "status": status, "end_year": end_year, "urgency": selected_urgency,
-    }.items() if value})
+    pagination_query = urlencode([
+        *(("faculty", value) for value in faculty),
+        *((key, value) for key, value in {
+            "q": q, "status": status, "end_year": end_year, "urgency": selected_urgency,
+        }.items() if value),
+    ])
     response = views.TemplateResponse(request, "contracts.html", {
         "registry": registry,
         "faculties": faculties,
@@ -598,7 +604,7 @@ def contracts_registry(
         "urgency_buckets": URGENCY_BUCKETS,
         "urgency_counts": urgency_counts,
         "selected_urgency": selected_urgency,
-        "selected_faculty": faculty,
+        "selected_faculties": faculty,
         "selected_status": status,
         "selected_end_year": end_year,
         "q": q,
@@ -610,21 +616,24 @@ def contracts_registry(
 
 
 @app.get("/applications", response_class=HTMLResponse)
-def applications(request: Request, q: str = "", faculty: str = "", status: str = "", urgency: str = "", page: int = 1):
+def applications(request: Request, q: str = "", faculty: list[str] = Query(default=[]), status: str = "", urgency: str = "", page: int = 1):
     urgency = "due_30" if urgency == "due_30" else ""
     session = db()
     registry, faculties = get_application_registry(
         session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=page,
     )
-    pagination_query = urlencode({key: value for key, value in {
-        "q": q, "faculty": faculty, "status": status, "urgency": urgency,
-    }.items() if value})
+    pagination_query = urlencode([
+        *(("faculty", value) for value in faculty),
+        *((key, value) for key, value in {
+            "q": q, "status": status, "urgency": urgency,
+        }.items() if value),
+    ])
     response = views.TemplateResponse(request, "applications.html", {
         "registry": registry,
         "faculties": faculties,
         "statuses": APPLICATION_STATUSES,
         "q": q,
-        "selected_faculty": faculty,
+        "selected_faculties": faculty,
         "selected_status": status,
         "selected_urgency": urgency,
         "pagination_prefix": f"?{pagination_query}&" if pagination_query else "?",
@@ -638,7 +647,7 @@ XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 
 @app.get("/export/contracts")
-def export_contracts(q: str = "", faculty: str = "", status: str = "", end_year: str = "", urgency: str = ""):
+def export_contracts(q: str = "", faculty: list[str] = Query(default=[]), status: str = "", end_year: str = "", urgency: str = ""):
     session = db()
     registry, *_ = get_contract_registry(
         session, query_text=q, faculty=faculty, status=status,
@@ -652,7 +661,7 @@ def export_contracts(q: str = "", faculty: str = "", status: str = "", end_year:
 
 
 @app.get("/export/applications")
-def export_applications(q: str = "", faculty: str = "", status: str = "", urgency: str = ""):
+def export_applications(q: str = "", faculty: list[str] = Query(default=[]), status: str = "", urgency: str = ""):
     session = db()
     registry, _ = get_application_registry(
         session, query_text=q, faculty=faculty, status=status, urgency=urgency, page=None,

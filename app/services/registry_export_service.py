@@ -29,13 +29,14 @@ def _demands(item) -> list[object]:
     return [values.get(year, "—") for year in YEARS]
 
 
-def contracts_xlsx(registry, faculty: str = "") -> BytesIO:
+def contracts_xlsx(registry, faculty: str | list[str] = "") -> BytesIO:
+    selected_faculties = {faculty} if isinstance(faculty, str) and faculty else set(faculty)
     rows = []
     for entry in registry.rows:
         contract = entry.contract
         for item in contract.items:
             faculty_name = item.faculty.name if item.faculty else ""
-            if faculty and faculty_name != faculty:
+            if selected_faculties and faculty_name not in selected_faculties:
                 continue
             rows.append([
                 faculty_name,
@@ -56,12 +57,13 @@ def contracts_xlsx(registry, faculty: str = "") -> BytesIO:
     ], rows)
 
 
-def applications_xlsx(registry, faculty: str = "") -> BytesIO:
+def applications_xlsx(registry, faculty: str | list[str] = "") -> BytesIO:
+    selected_faculties = {faculty} if isinstance(faculty, str) and faculty else set(faculty)
     rows = []
     for application in registry.rows:
         for item in application.items:
             faculty_name = item.faculty.name if item.faculty else ""
-            if faculty and faculty_name != faculty:
+            if selected_faculties and faculty_name not in selected_faculties:
                 continue
             rows.append([
                 faculty_name,
