@@ -44,6 +44,7 @@ class Organization(Base):
     legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     authority: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
     contracts: Mapped[list["Contract"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     applications: Mapped[list["Application"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     @property

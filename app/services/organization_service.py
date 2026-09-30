@@ -180,6 +180,8 @@ def update_organization(session, organization: Organization, **values):
     organization.legal_address = values.get("address", "").strip() or None
     organization.authority = values.get("department", "").strip() or None
     organization.phone = values.get("phone", "").strip() or None
+    if values.get("unp", "").strip():
+        organization.unp = values["unp"].strip()
     return organization
 
 

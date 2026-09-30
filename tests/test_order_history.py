@@ -166,7 +166,12 @@ def test_document_cards_have_one_order_history_entry(session, contract, organiza
     session.commit()
     response = client.post(
         f"/applications/{application.id}/items",
-        data={"specialty": specialty.code, "profile": "Ручная правка", "qualification": "Инженер"},
+        data={
+            "faculty_id": str(application.faculty_links[0].faculty_id),
+            "specialty": specialty.code,
+            "profile": "Ручная правка",
+            "qualification": "Инженер",
+        },
     )
     assert response.status_code == 303
     saved = session.scalar(select(OrderItem).where(OrderItem.specialty_id == specialty.id))

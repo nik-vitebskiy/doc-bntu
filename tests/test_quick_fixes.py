@@ -22,11 +22,8 @@ def test_contract_creation_requires_start_date_and_allows_empty_end_date(
             "end_date": "2030-01-01",
         },
     )
-    assert missing_start.status_code == 303
-    assert "contract_date_error_field=start_date" in missing_start.headers["location"]
-    error_page = client.get(missing_start.headers["location"])
-    assert error_page.status_code == 200
-    assert "Укажите дату начала договора." in error_page.text
+    assert missing_start.status_code == 422
+    assert "Дата начала" in missing_start.text
     assert session.scalar(select(Contract).where(Contract.number == "DATE-INVALID")) is None
 
     created = client.post(
@@ -60,10 +57,8 @@ def test_contract_end_date_cannot_precede_start_date(session, organization, clie
         },
     )
 
-    assert response.status_code == 303
-    assert "contract_date_error_field=end_date" in response.headers["location"]
-    page = client.get(response.headers["location"])
-    assert "Дата окончания не может быть раньше даты начала." in page.text
+    assert response.status_code == 422
+    assert "Дата окончания не может быть раньше даты начала." in response.text
 
 
 def test_application_status_comment_is_optional_in_both_directions(
@@ -134,7 +129,7 @@ def test_order_item_web_form_only_accepts_specialty_from_catalog(
         f"/contracts/{contract.id}/items",
         data={"faculty_id": faculty_id, "specialty": "TYPO-01", "qualification": ""},
     )
-    assert rejected.status_code == 400
+    assert rejected.status_code == 422
     assert "Выберите специальность из справочника." in rejected.text
     assert session.scalar(select(Specialty).where(Specialty.code == "TYPO-01")) is None
 
