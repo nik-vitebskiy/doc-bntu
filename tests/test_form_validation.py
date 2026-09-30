@@ -1,4 +1,8 @@
-from app.models import Faculty, Specialty
+import traceback
+
+from sqlalchemy import event, func, select
+
+from app.models import AppUser, AuditLog, Faculty, Specialty, engine
 from app.services.file_service import AttachmentError, MAX_FILE_SIZE, validate_attachment
 from fastapi.testclient import TestClient
 
@@ -106,3 +110,31 @@ def test_unexpected_exception_has_friendly_page(monkeypatch):
     assert response.status_code == 500
     assert "Произошла ошибка" in response.text
     assert "secret traceback marker" not in response.text
+
+
+def test_failed_forms_never_mutate_existing_audit_rows(client, session):
+    statements = []
+
+    def catch_audit_mutation(_conn, _cursor, statement, _parameters, _context, _many):
+        normalized = " ".join(statement.upper().replace('"', "").split())
+        if normalized.startswith(("UPDATE AUDIT_LOG", "DELETE FROM AUDIT_LOG")):
+            statements.append((statement, "".join(traceback.format_stack())))
+
+    audit_count = session.scalar(select(func.count(AuditLog.id)))
+    admin = session.scalar(select(AppUser).where(AppUser.username == "test-admin"))
+    event.listen(engine, "before_cursor_execute", catch_audit_mutation)
+    try:
+        blocked = client.post(f"/users/{admin.id}/edit", data={
+            "full_name": admin.full_name,
+            "role": "HEAD",
+        })
+        invalid = client.post("/organizations/new", data={"name": "", "unp": "bad"})
+    finally:
+        event.remove(engine, "before_cursor_execute", catch_audit_mutation)
+
+    assert blocked.status_code == 400
+    assert invalid.status_code == 422
+    assert statements == [], "Запрещённая мутация audit_log:\n" + "\n".join(
+        f"{sql}\n{stack}" for sql, stack in statements
+    )
+    assert session.scalar(select(func.count(AuditLog.id))) == audit_count

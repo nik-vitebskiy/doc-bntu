@@ -402,7 +402,7 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
         response = views.TemplateResponse(request, "user_form.html", {
             "edited_user": user, "error": str(error), "full_name": full_name,
             "selected_role": role,
-        }, status_code=422)
+        }, status_code=400)
         session.close()
         return response
     session.close()
