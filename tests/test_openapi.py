@@ -44,6 +44,7 @@ EXPECTED_OPERATIONS = {
     ("get", "/api/audit"), ("get", "/api/audit/metadata"),
     ("get", "/api/users"), ("post", "/api/users"),
     ("put", "/api/users/{user_id}"), ("post", "/api/users/{user_id}/reset-password"),
+    ("patch", "/api/users/{user_id}/status"),
     ("get", "/api/settings/profile"),
     ("post", "/api/import"), ("get", "/api/imports"),
     ("post", "/api/reconciliation"), ("get", "/api/reconciliation/{token}/export"),

@@ -37,7 +37,7 @@ from ..services.application_service import create_application, save_application_
 from ..services.audit_metadata import ACTION_LABELS, ENTITY_FILTERS
 from ..services.audit_registry_service import get_audit_registry
 from ..services.audit_service import AuditActor
-from ..services.auth_service import create_user, reset_password, update_user
+from ..services.auth_service import create_user, reset_password, set_user_active, update_user
 from ..services.document_registry_service import application_registry, contract_registry
 from ..services.document_status_service import (
     StatusTransitionError,
@@ -462,6 +462,10 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     full_name: str = Field(min_length=1)
     role: Literal["ADMIN", "HEAD"]
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool = Field(description="true — активировать, false — деактивировать")
 
 
 class PasswordReset(BaseModel):
@@ -1096,6 +1100,29 @@ def update_user_api(user_id: int, payload: UserUpdate, request: Request, admin: 
         raise HTTPException(404, "Пользователь не найден.")
     try:
         update_user(session, value, payload.full_name, payload.role, audit_actor=actor(request, admin))
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    return user_data(value)
+
+
+@router.patch("/users/{user_id}/status", tags=["users"], response_model=UserResponse, responses=ERRORS,
+              summary="Активировать или деактивировать пользователя",
+              description=("Только ADMIN. Нельзя деактивировать себя или последнего активного "
+                           "администратора. Деактивированный пользователь немедленно теряет доступ."))
+def update_user_status_api(user_id: int, payload: UserStatusUpdate, request: Request,
+                           admin: AppUser = Security(require_admin_user),
+                           session: Session = Depends(get_session)):
+    value = session.get(AppUser, user_id)
+    if not value:
+        raise HTTPException(404, "Пользователь не найден.")
+    try:
+        set_user_active(
+            session,
+            value,
+            payload.is_active,
+            actor_user_id=admin.id,
+            audit_actor=actor(request, admin),
+        )
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     return user_data(value)

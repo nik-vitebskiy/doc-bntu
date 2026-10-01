@@ -108,6 +108,28 @@ def test_contract_registry_combines_search_filters_urgency_and_scan(
     assert f"/organizations/{organization.id}#contract-{target.id}" in response.text
     assert "Есть подписанный скан" in response.text
     assert "Документы" not in response.text
+    assert 'data-optional="true"' in response.text
+    assert "Все факультеты" in response.text
+
+    without_faculty = client.get("/contracts", params={
+        "q": target.number,
+        "status": "Активен",
+        "end_year": target.end_date.year,
+    })
+    assert without_faculty.status_code == 200
+    assert target.number in without_faculty.text
+
+    toggle = client.get("/contracts", params={
+        "q": target.number,
+        "status": "Активен",
+        "end_year": target.end_date.year,
+        "urgency_choice": URGENCY_DUE_30,
+    }, follow_redirects=False)
+    assert toggle.status_code == 303
+    assert "urgency=due_30" in toggle.headers["location"]
+    assert "faculty=" not in toggle.headers["location"]
+    active = client.get(toggle.headers["location"])
+    assert 'urgency-due_30 active' in active.text
 
 
 def test_application_registry_combines_search_faculty_status_and_scan(
@@ -214,6 +236,17 @@ def test_application_registry_filters_year_and_all_urgency_buckets(
     assert "Любой год окончания" in page.text
     assert "31–90 дней" in page.text and "&gt; 90 дней" in page.text
     assert "просрочен" in page.text
+    assert 'data-optional="true"' in page.text
+    assert 'urgency-due_30 active' in page.text
+
+    without_faculty = client.get("/applications", params={
+        "q": "FAR",
+        "status": "Заявка",
+        "end_year": values["FAR"].year,
+        "urgency": URGENCY_LATER,
+    })
+    assert without_faculty.status_code == 200
+    assert created["FAR"].number in without_faculty.text
 
 
 def test_organization_card_shows_and_expands_selected_application(

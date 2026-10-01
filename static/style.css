@@ -436,6 +436,9 @@ mark{
 .change-unchanged{background:#edf0f3;color:#657180}
 .change-removed{background:#fbe5e7;color:#a13b47}
 .muted{color:#718096;font-size:13px}
+.user-disabled{color:#8792a2;background:#f6f7f9}
+.user-disabled strong{color:#718096}
+.disabled-badge{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:9px;background:#e4e7eb;color:#657180;font-size:10px;font-weight:bold}
 
 .status-actions,.contract-actions,.dialog-actions{
   display:flex;
