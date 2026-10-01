@@ -63,6 +63,36 @@ def test_application_profile_is_saved_and_rendered(
     assert 'class="order-table"' in page.text
 
 
+def test_order_item_position_is_stable_after_api_update(session, contract, user, actor, client):
+    first = save_item(
+        session, contract.id, "STABLE-01", "Инженер",
+        {"profile": "Первый", "demand_2027": "1"},
+        user_id=user.id, audit_actor=actor,
+    )
+    second = save_item(
+        session, contract.id, "STABLE-02", "Инженер",
+        {"profile": "Второй", "demand_2027": "2"},
+        user_id=user.id, audit_actor=actor,
+    )
+    before = client.get(f"/organizations/{contract.organization_id}").text
+    before_order = [before.index(f'id="item-{item.id}"') for item in (first, second)]
+
+    response = client.put(f"/api/order-items/{first.id}", json={
+        "faculty_id": first.faculty_id,
+        "specialty_id": first.specialty_id,
+        "profile": "Первый изменён",
+        "qualification": "Инженер",
+        "years": {"2027": 3},
+    })
+    assert response.status_code == 200
+
+    after = client.get(f"/organizations/{contract.organization_id}").text
+    after_order = [after.index(f'id="item-{item.id}"') for item in (first, second)]
+    assert before_order[0] < before_order[1]
+    assert after_order[0] < after_order[1]
+    assert "из справочника:" not in after
+
+
 def test_profile_is_copied_and_visible_when_revision_changes(
     session, contract, user, actor
 ):

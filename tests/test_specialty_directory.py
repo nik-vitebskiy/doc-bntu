@@ -184,5 +184,4 @@ def test_specialty_update_backfills_only_empty_items_as_one_audit_event(
     session.add(legacy_empty)
     session.commit()
     page = client.get(f"/organizations/{contract.organization_id}")
-    assert 'placeholder="из справочника: test"' in page.text
-    assert 'placeholder="из справочника: Инженер"' in page.text
+    assert "из справочника:" not in page.text
