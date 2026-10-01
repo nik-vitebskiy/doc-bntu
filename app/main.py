@@ -17,11 +17,13 @@ from .services.import_service import import_xlsx
 from .services.reconciliation_service import load_report, reconcile_xlsx, report_xlsx
 from .services.organization_service import InactiveOrderRevisionError, compare_agreement_order, create_contract, create_organization, delete_item, organization_contracts, register_additional_agreement, registry as get_registry, save_item, update_contract, update_organization
 from .services.auth_service import (
+    AccountDisabledError,
     authenticate,
     change_password,
     create_initial_admin,
     create_user,
     has_users,
+    set_user_active,
     update_email,
     update_user,
     verify_password,
@@ -214,7 +216,7 @@ async def require_login(request: Request, call_next):
         request.session.clear()
         if path.startswith("/api/"):
             return JSONResponse({"detail": "Требуется авторизация."}, status_code=401)
-        destination = "/login" if configured else "/setup"
+        destination = "/login?disabled=1" if configured else "/setup"
         return RedirectResponse(destination, status_code=303)
     request.state.user = user
     must_change_password = user.must_change_password
@@ -246,18 +248,24 @@ async def require_login(request: Request, call_next):
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "change-me-before-production"), https_only=False)
 
 @app.get("/login", response_class=HTMLResponse)
-def login_form(request: Request):
+def login_form(request: Request, disabled: bool = False):
     session = db()
     configured = has_users(session)
     session.close()
     if not configured:
         return RedirectResponse("/setup", status_code=303)
-    return views.TemplateResponse(request, "login.html", {"error": ""})
+    error = "Учётная запись отключена. Обратитесь к администратору" if disabled else ""
+    return views.TemplateResponse(request, "login.html", {"error": error})
 
 @app.post("/login", response_class=HTMLResponse)
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     client_ip = request.client.host if request.client else None
-    s = db(); user = authenticate(s, username, password, client_ip)
+    s = db()
+    try:
+        user = authenticate(s, username, password, client_ip)
+    except AccountDisabledError as error:
+        s.close()
+        return views.TemplateResponse(request, "login.html", {"error": str(error)}, status_code=401)
     if not user:
         s.close()
         return views.TemplateResponse(request, "login.html", {"error": "Неверный логин или пароль."}, status_code=401)
@@ -448,6 +456,29 @@ def save_user(request: Request, user_id: int, full_name: str = Form(...), role: 
         }, status_code=400)
         session.close()
         return response
+    session.close()
+    return RedirectResponse("/users", status_code=303)
+
+
+@app.post("/users/{user_id}/status")
+def save_user_status(request: Request, user_id: int, is_active: bool = Form(...)):
+    require_admin(request)
+    session = db()
+    user = session.get(AppUser, user_id)
+    if not user:
+        session.close()
+        raise HTTPException(404)
+    try:
+        set_user_active(
+            session,
+            user,
+            is_active,
+            actor_user_id=request.state.user.id,
+            audit_actor=audit_actor(request),
+        )
+    except ValueError as error:
+        session.close()
+        raise HTTPException(400, str(error)) from error
     session.close()
     return RedirectResponse("/users", status_code=303)
 
