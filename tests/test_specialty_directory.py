@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import AppUser, AuditLog, OrderItem, Specialty
+from app.models import AppUser, AuditLog, Contract, Order, OrderItem, Specialty
 from app.services.auth_service import hash_password
 
 
@@ -104,3 +104,84 @@ def test_specialty_picker_autofills_profile_and_qualification_but_allows_overrid
     item = session.scalar(select(OrderItem).where(OrderItem.specialty_id == specialty.id))
     assert item.profile == "Профиль из документа"
     assert item.qualification_value == "Квалификация из документа"
+
+
+def test_specialty_update_backfills_only_empty_items_as_one_audit_event(
+    client, session, contract
+):
+    specialty = Specialty(code="7-07-0732-01", name="7-07-0732-01")
+    second_contract = Contract(
+        organization_id=contract.organization_id,
+        number="SECOND-2026",
+        start_date=contract.start_date,
+        status="Активен",
+    )
+    session.add_all([specialty, second_contract])
+    session.flush()
+    first_order = Order(
+        organization_id=contract.organization_id,
+        contract_id=contract.id,
+        is_current=True,
+        revision=1,
+        status="CURRENT",
+    )
+    second_order = Order(
+        organization_id=contract.organization_id,
+        contract_id=second_contract.id,
+        is_current=True,
+        revision=1,
+        status="CURRENT",
+    )
+    session.add_all([first_order, second_order])
+    session.flush()
+    empty_null = OrderItem(order_id=first_order.id, specialty_id=specialty.id)
+    empty_spaces = OrderItem(
+        order_id=second_order.id,
+        specialty_id=specialty.id,
+        profile="   ",
+        qualification_value="",
+    )
+    manual = OrderItem(
+        order_id=first_order.id,
+        specialty_id=specialty.id,
+        profile="Ручной профиль",
+        qualification_value="Ручная квалификация",
+    )
+    session.add_all([empty_null, empty_spaces, manual])
+    session.commit()
+
+    response = client.put(f"/api/specialties/{specialty.id}", json={
+        "name": "Геодезия",
+        "profile": "test",
+        "qualification": "Инженер",
+    })
+    assert response.status_code == 200
+    session.expire_all()
+    assert session.get(OrderItem, empty_null.id).profile == "test"
+    assert session.get(OrderItem, empty_null.id).qualification_value == "Инженер"
+    assert session.get(OrderItem, empty_spaces.id).profile == "test"
+    assert session.get(OrderItem, empty_spaces.id).qualification_value == "Инженер"
+    assert session.get(OrderItem, manual.id).profile == "Ручной профиль"
+    assert session.get(OrderItem, manual.id).qualification_value == "Ручная квалификация"
+
+    events = session.scalars(select(AuditLog).where(
+        AuditLog.entity_type == "specialty",
+        AuditLog.entity_id == specialty.id,
+        AuditLog.action == "UPDATE",
+    )).all()
+    assert len(events) == 1
+    assert events[0].comment == (
+        "Дозаполнение из справочника: специальность 7-07-0732-01, обновлено 2 строк"
+    )
+    assert events[0].diff["old"]["profile"] is None
+    assert events[0].diff["new"]["profile"] == "test"
+    assert session.scalar(select(AuditLog).where(
+        AuditLog.entity_type == "order_item",
+        AuditLog.entity_id.in_([empty_null.id, empty_spaces.id]),
+    )) is None
+
+    legacy_empty = OrderItem(order_id=first_order.id, specialty_id=specialty.id)
+    session.add(legacy_empty)
+    session.commit()
+    page = client.get(f"/organizations/{contract.organization_id}")
+    assert "из справочника:" not in page.text

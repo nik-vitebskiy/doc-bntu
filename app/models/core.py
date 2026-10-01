@@ -210,7 +210,11 @@ class Order(Base):
     additional_agreement: Mapped[AdditionalAgreement | None] = relationship(back_populates="orders")
     application: Mapped[Application | None] = relationship(back_populates="orders")
     creator: Mapped[AppUser | None] = relationship(foreign_keys=[created_by])
-    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    items: Mapped[list["OrderItem"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderItem.id",
+    )
 
 
 class OrderItem(Base):
