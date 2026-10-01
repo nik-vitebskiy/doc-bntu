@@ -3,8 +3,8 @@ from math import ceil
 
 from sqlalchemy import func, or_
 
-from ..models import Specialty
-from .audit_service import audited
+from ..models import OrderItem, Specialty
+from .audit_service import AuditAction, audited, current_audit_batch
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,41 @@ def specialty_registry(session, query: str = "", page: int = 1, per_page: int = 
 
 @audited
 def update_specialty(session, specialty: Specialty, name: str, profile: str, qualification: str) -> Specialty:
+    old_values = {
+        "name": specialty.name,
+        "profile": specialty.profile,
+        "qualification": specialty.qualification,
+    }
     specialty.name = name.strip() or specialty.code
     specialty.profile = profile.strip() or None
     specialty.qualification = qualification.strip() or None
+
+    updated_items = []
+    for item in session.query(OrderItem).filter(OrderItem.specialty_id == specialty.id):
+        changed = False
+        if specialty.profile and not (item.profile or "").strip():
+            item.profile = specialty.profile
+            changed = True
+        if specialty.qualification and not (item.qualification_value or "").strip():
+            item.qualification_value = specialty.qualification
+            changed = True
+        if changed:
+            updated_items.append(item)
+
+    new_values = {
+        "name": specialty.name,
+        "profile": specialty.profile,
+        "qualification": specialty.qualification,
+    }
+    if old_values != new_values or updated_items:
+        batch = current_audit_batch(session)
+        batch.suppress(*updated_items)
+        batch.record(
+            specialty,
+            AuditAction.UPDATE,
+            old=old_values,
+            new=new_values,
+            comment=(f"Дозаполнение из справочника: специальность {specialty.code}, "
+                     f"обновлено {len(updated_items)} строк"),
+        )
     return specialty

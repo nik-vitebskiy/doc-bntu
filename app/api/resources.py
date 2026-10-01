@@ -675,7 +675,9 @@ def specialties(q: str = Query("", examples=["1-37"]), page: int = Query(1, ge=1
 
 @router.put("/specialties/{specialty_id}", tags=["specialties"], response_model=SpecialtyResponse, responses=ERRORS,
             summary="Изменить специальность",
-            description="Только ADMIN. Код остаётся неизменным; пустые name/profile/qualification допустимы.")
+            description=("Только ADMIN. Код остаётся неизменным; пустые name/profile/qualification допустимы. "
+                         "Заполненные профилизация и квалификация дозаполняются во все пустые строки заказа; "
+                         "ручные значения строк не изменяются."))
 def save_specialty_api(specialty_id: int, payload: SpecialtyUpdate, request: Request,
                        user: AppUser = Security(require_admin_user), session: Session = Depends(get_session)):
     specialty = session.get(Specialty, specialty_id)
