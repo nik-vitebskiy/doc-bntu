@@ -165,10 +165,18 @@ def organization_contracts(organization, faculty_id=None):
 @audited
 def create_organization(session, **values):
     name = values["name"].strip()
-    unp = values.get("unp") or f"9{(session.query(func.count(Organization.id)).scalar() + 1):08d}"
-    org = Organization(unp=unp, short_name=name, full_name=values.get("full_name") or name,
-                       legal_address=values.get("address") or None, authority=values.get("department") or None,
-                       phone=values.get("phone") or None)
+    unp = str(values.get("unp") or "").strip() or f"9{(session.query(func.count(Organization.id)).scalar() + 1):08d}"
+    if session.query(Organization.id).filter(Organization.unp == unp).first():
+        raise ValueError("Организация с таким УНП уже существует.")
+    full_name = str(values.get("full_name") or "").strip() or name
+    org = Organization(
+        unp=unp,
+        short_name=name,
+        full_name=full_name,
+        legal_address=str(values.get("address") or "").strip() or None,
+        authority=str(values.get("department") or "").strip() or None,
+        phone=str(values.get("phone") or "").strip() or None,
+    )
     session.add(org)
     return org
 
@@ -176,12 +184,19 @@ def create_organization(session, **values):
 @audited
 def update_organization(session, organization: Organization, **values):
     organization.short_name = values["name"].strip()
-    organization.full_name = values.get("full_name", "").strip() or organization.short_name
-    organization.legal_address = values.get("address", "").strip() or None
-    organization.authority = values.get("department", "").strip() or None
-    organization.phone = values.get("phone", "").strip() or None
-    if values.get("unp", "").strip():
-        organization.unp = values["unp"].strip()
+    organization.full_name = str(values.get("full_name") or "").strip() or organization.short_name
+    organization.legal_address = str(values.get("address") or "").strip() or None
+    organization.authority = str(values.get("department") or "").strip() or None
+    organization.phone = str(values.get("phone") or "").strip() or None
+    unp = str(values.get("unp") or "").strip()
+    if unp:
+        duplicate = session.query(Organization.id).filter(
+            Organization.unp == unp,
+            Organization.id != organization.id,
+        ).first()
+        if duplicate:
+            raise ValueError("Организация с таким УНП уже существует.")
+        organization.unp = unp
     return organization
 
 

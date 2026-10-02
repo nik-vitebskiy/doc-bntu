@@ -98,7 +98,14 @@ async def request_validation_error(request: Request, error: RequestValidationErr
     errors = {}
     for item in error.errors():
         field = str(item.get("loc", ("form",))[-1])
-        errors[field] = "Обязательное поле не заполнено." if item.get("type") == "missing" else "Некорректное значение поля."
+        context_error = item.get("ctx", {}).get("error")
+        errors[field] = (
+            "Обязательное поле не заполнено."
+            if item.get("type") == "missing"
+            else str(context_error)
+            if context_error
+            else "Некорректное значение поля."
+        )
     return _validation_response(request, errors)
 
 
