@@ -11,6 +11,7 @@ OPENAPI_TAGS = [
     {"name": "contracts", "description": "Договоры и дополнительные соглашения."},
     {"name": "applications", "description": "Заявки организаций-заказчиков."},
     {"name": "orders", "description": "Редакции кадрового заказа и потребность по годам."},
+    {"name": "files", "description": "Файлы договоров, дополнительных соглашений и заявок."},
     {"name": "audit", "description": "Неизменяемый журнал действий."},
     {"name": "users", "description": "Управление пользователями; только для администратора."},
     {
