@@ -24,7 +24,8 @@ EXPECTED_OPERATIONS = {
     ("post", "/api/auth/change-password"),
     ("get", "/api/faculties"), ("get", "/api/specialties"),
     ("put", "/api/specialties/{specialty_id}"),
-    ("get", "/api/organizations"), ("get", "/api/organizations/{organization_id}"),
+    ("get", "/api/organizations"), ("post", "/api/organizations"),
+    ("get", "/api/organizations/{organization_id}"), ("put", "/api/organizations/{organization_id}"),
     ("get", "/api/statistics"),
     ("get", "/api/contracts"), ("post", "/api/contracts"),
     ("get", "/api/contracts/{contract_id}"), ("put", "/api/contracts/{contract_id}"),
@@ -110,6 +111,7 @@ def test_every_documented_operation_has_summary_tags_security_and_response_schem
             ("post", "/api/orders/{order_id}/items"),
             ("post", "/api/contracts/{contract_id}/order-items"),
             ("post", "/api/users"),
+            ("post", "/api/organizations"),
         } else "200"
         assert success_code in operation["responses"]
         if success_code != "204":

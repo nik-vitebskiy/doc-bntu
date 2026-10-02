@@ -50,11 +50,13 @@ from ..services.order_history_service import compare_revisions, get_order_histor
 from ..services.organization_service import (
     InactiveOrderRevisionError,
     create_contract,
+    create_organization,
     delete_item,
     register_additional_agreement,
     registry as organization_registry,
     save_item,
     update_contract,
+    update_organization,
 )
 from ..services.reconciliation_service import load_report, reconcile_xlsx, report_xlsx
 from ..services.registry_export_service import applications_xlsx, contracts_xlsx
@@ -302,6 +304,36 @@ class OrganizationRegistryItem(ApiModel):
     specialties: list[str] = Field(examples=[["1-37 01 03", "1-36 01 01"]])
     status: str
     date_end: date | None
+
+
+class OrganizationWrite(BaseModel):
+    short_name: str = Field(min_length=1, max_length=255, examples=['ОАО "МТЗ"'])
+    full_name: str | None = Field(
+        default=None,
+        examples=["Открытое акционерное общество «Минский тракторный завод»"],
+    )
+    legal_address: str | None = Field(default=None, examples=["220070, г. Минск, ул. Долгобродская, 29"])
+    authority: str | None = Field(default=None, max_length=255, examples=["Министерство промышленности"])
+    phone: str | None = Field(default=None, max_length=50, examples=["+375 17 246-60-09"])
+    unp: str | None = Field(default=None, examples=["100316761"])
+
+    @field_validator("short_name")
+    @classmethod
+    def short_name_is_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Укажите краткое наименование организации.")
+        return value
+
+    @field_validator("unp", mode="before")
+    @classmethod
+    def valid_unp(cls, value):
+        value = str(value or "").strip()
+        if not value:
+            return None
+        if len(value) != 9 or not value.isdigit():
+            raise ValueError("УНП должен содержать 9 цифр.")
+        return value
 
 
 class OrganizationResponse(ApiModel):
@@ -630,6 +662,20 @@ def application_data(value: Application, *, detail: bool = False) -> dict:
     return result
 
 
+def organization_data(value: Organization) -> dict:
+    return {
+        "id": value.id,
+        "unp": value.unp,
+        "short_name": value.short_name,
+        "full_name": value.full_name,
+        "legal_address": value.legal_address,
+        "authority": value.authority,
+        "phone": value.phone,
+        "contracts": [contract_data(row) for row in value.contracts],
+        "applications": [application_data(row) for row in value.applications],
+    }
+
+
 def user_data(value: AppUser) -> dict:
     return {
         "id": value.id,
@@ -719,18 +765,64 @@ def organizations(q: str = Query("", examples=["МТЗ"]), faculty_id: int | Non
     }
 
 
+@router.post("/organizations", tags=["organizations"], response_model=OrganizationResponse,
+             status_code=201, responses=ERRORS, summary="Создать организацию",
+             description=("Создаёт карточку организации. Совпадение краткого наименования не считается "
+                          "ошибкой; УНП, если указан, должен состоять из 9 цифр."))
+def create_organization_api(payload: OrganizationWrite, request: Request,
+                            user: AppUser = Security(require_api_user),
+                            session: Session = Depends(get_session)):
+    try:
+        value = create_organization(
+            session,
+            name=payload.short_name,
+            full_name=payload.full_name,
+            address=payload.legal_address,
+            department=payload.authority,
+            phone=payload.phone,
+            unp=payload.unp,
+            audit_actor=actor(request, user),
+        )
+    except ValueError as error:
+        mutation_error(error)
+    return organization_data(value)
+
+
 @router.get("/organizations/{organization_id}", tags=["organizations"], response_model=OrganizationResponse, responses=ERRORS,
             summary="Получить карточку организации с договорами и заявками")
 def organization_card(organization_id: int, _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
     value = session.get(Organization, organization_id)
     if not value:
         raise HTTPException(404, "Организация не найдена.")
-    return {
-        "id": value.id, "unp": value.unp, "short_name": value.short_name, "full_name": value.full_name,
-        "legal_address": value.legal_address, "authority": value.authority, "phone": value.phone,
-        "contracts": [contract_data(row) for row in value.contracts],
-        "applications": [application_data(row) for row in value.applications],
-    }
+    return organization_data(value)
+
+
+@router.put("/organizations/{organization_id}", tags=["organizations"],
+            response_model=OrganizationResponse, responses=ERRORS,
+            summary="Изменить реквизиты организации",
+            description=("Изменяет краткое и полное наименование, адрес, ведомство, телефон и УНП. "
+                         "Совпадение краткого наименования разрешено."))
+def update_organization_api(organization_id: int, payload: OrganizationWrite, request: Request,
+                            user: AppUser = Security(require_api_user),
+                            session: Session = Depends(get_session)):
+    value = session.get(Organization, organization_id)
+    if not value:
+        raise HTTPException(404, "Организация не найдена.")
+    try:
+        update_organization(
+            session,
+            value,
+            name=payload.short_name,
+            full_name=payload.full_name,
+            address=payload.legal_address,
+            department=payload.authority,
+            phone=payload.phone,
+            unp=payload.unp,
+            audit_actor=actor(request, user),
+        )
+    except ValueError as error:
+        mutation_error(error)
+    return organization_data(value)
 
 
 @router.get("/statistics", tags=["organizations"], response_model=StatisticsResponse, responses=ERRORS,
