@@ -13,9 +13,10 @@ from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Security, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -46,6 +47,16 @@ from ..services.document_status_service import (
     change_contract_status,
 )
 from ..services.import_service import import_xlsx
+from ..services.file_service import (
+    AttachmentError,
+    create_attachment,
+    delete_attachment,
+    get_attachment_metadata,
+    list_attachments,
+    read_attachment_content,
+    restore_attachment,
+    stream_attachment,
+)
 from ..services.order_history_service import compare_revisions, get_order_history
 from ..services.organization_service import (
     InactiveOrderRevisionError,
@@ -103,6 +114,13 @@ ERRORS = {
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 BINARY_RESPONSE = {
     200: {"description": "Файл XLSX", "content": {XLSX: {"schema": {"type": "string", "format": "binary"}}}},
+    **ERRORS,
+}
+FILE_DOWNLOAD_RESPONSE = {
+    200: {
+        "description": "Содержимое файла",
+        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    },
     **ERRORS,
 }
 
@@ -483,6 +501,17 @@ class UserPage(PageMeta):
     items: list[UserResponse]
 
 
+class FileResponse(ApiModel):
+    id: int = Field(examples=[12])
+    original_name: str = Field(examples=["подписанный договор.pdf"])
+    mime_type: str = Field(examples=["application/pdf"])
+    size_bytes: int = Field(examples=[245760])
+    uploaded_by: int | None = Field(examples=[1])
+    uploaded_at: datetime
+    file_kind: Literal["signed_scan", "source_file"]
+    deleted_at: datetime | None = None
+
+
 class UserCreate(BaseModel):
     full_name: str = Field(min_length=1, examples=["Петров Пётр Петрович"])
     username: str = Field(min_length=3, examples=["petrov"])
@@ -597,6 +626,28 @@ def item_data(value: OrderItem) -> dict:
         "qualification": value.qualification_value or value.specialty_ref.qualification,
         "years": {str(row.year): row.quantity for row in value.annual_demands},
     }
+
+
+def file_data(value) -> dict:
+    return {
+        "id": value.id,
+        "original_name": value.original_name,
+        "mime_type": value.mime_type,
+        "size_bytes": value.size_bytes,
+        "uploaded_by": value.uploaded_by,
+        "uploaded_at": value.uploaded_at,
+        "file_kind": value.file_kind,
+        "deleted_at": value.deleted_at,
+    }
+
+
+def attachment_http_error(error: AttachmentError) -> None:
+    message = str(error)
+    if "автор или администратор" in message:
+        raise HTTPException(403, message) from error
+    if "уже удалён" in message or "не удалён" in message:
+        raise HTTPException(409, message) from error
+    raise HTTPException(422, message) from error
 
 
 def order_data(value: Order | None) -> dict | None:
@@ -1033,6 +1084,36 @@ def update_application_api(application_id: int, payload: ApplicationUpdate, requ
     return application_data(value, detail=True)
 
 
+@router.post("/applications/{application_id}/order-items", tags=["applications", "orders"],
+             response_model=OrderItemResponse, status_code=201, responses=ERRORS,
+             summary="Добавить строку заказа заявки",
+             description=("Если у заявки ещё нет действующей редакции заказа, сервер создаёт её "
+                          "автоматически. Следующие строки добавляются в ту же редакцию."))
+def create_application_order_item(application_id: int, payload: OrderItemWrite, request: Request,
+                                  user: AppUser = Security(require_api_user),
+                                  session: Session = Depends(get_session)):
+    application = session.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, "Заявка не найдена.")
+    specialty = session.get(Specialty, payload.specialty_id)
+    if not specialty:
+        raise HTTPException(422, "Выберите специальность из справочника.")
+    try:
+        item = save_application_item(
+            session,
+            application,
+            specialty.code,
+            payload.qualification or "",
+            order_form(payload),
+            catalog_only=True,
+            user_id=user.id,
+            audit_actor=actor(request, user),
+        )
+    except (InactiveOrderRevisionError, ValueError) as error:
+        mutation_error(error)
+    return item_data(item)
+
+
 @router.post("/applications/{application_id}/status", tags=["applications"], response_model=StatusResponse,
              responses=ERRORS, summary="Сменить статус заявки")
 def application_status(application_id: int, payload: StatusChangeRequest, request: Request,
@@ -1070,7 +1151,8 @@ def save_order_item(session: Session, order: Order, payload: OrderItemWrite, req
         if order.application_id:
             application = session.get(Application, order.application_id)
             return save_application_item(session, application, specialty.code, payload.qualification or "", order_form(payload),
-                                         item, catalog_only=True, audit_actor=actor(request, user))
+                                         item, catalog_only=True, user_id=user.id,
+                                         audit_actor=actor(request, user))
         if order.contract_id:
             return save_item(session, order.contract_id, specialty.code, payload.qualification or "", order_form(payload), item,
                              user.id, catalog_only=True, audit_actor=actor(request, user))
@@ -1136,6 +1218,150 @@ def delete_order_item(item_id: int, request: Request, user: AppUser = Security(r
     except InactiveOrderRevisionError as error:
         raise HTTPException(409, str(error)) from error
     return None
+
+
+async def upload_document_file(
+    session: Session,
+    request: Request,
+    user: AppUser,
+    file: UploadFile,
+    file_kind: str,
+    **target,
+):
+    try:
+        attachment = create_attachment(
+            session,
+            filename=file.filename or "",
+            mime_type=file.content_type or "",
+            content=await read_attachment_content(file),
+            file_kind=file_kind,
+            uploaded_by=user.id,
+            audit_actor=actor(request, user),
+            **target,
+        )
+    except AttachmentError as error:
+        attachment_http_error(error)
+    return file_data(attachment)
+
+
+def document_files(session: Session, user: AppUser, include_deleted: bool, **target) -> list[dict]:
+    return [file_data(row) for row in list_attachments(
+        session,
+        include_deleted=include_deleted,
+        actor_id=user.id,
+        actor_role=user.role,
+        **target,
+    )]
+
+
+@router.post("/contracts/{contract_id}/files", tags=["files"], response_model=FileResponse,
+             status_code=201, responses=ERRORS, summary="Загрузить файл договора")
+async def upload_contract_file(contract_id: int, request: Request,
+                               file_kind: Literal["signed_scan", "source_file"] = Form(...),
+                               file: UploadFile = File(...),
+                               user: AppUser = Security(require_api_user),
+                               session: Session = Depends(get_session)):
+    contract = session.get(Contract, contract_id)
+    if not contract:
+        raise HTTPException(404, "Договор не найден.")
+    return await upload_document_file(session, request, user, file, file_kind, contract=contract)
+
+
+@router.get("/contracts/{contract_id}/files", tags=["files"], response_model=list[FileResponse],
+            responses=ERRORS, summary="Получить файлы договора")
+def contract_files(contract_id: int, include_deleted: bool = False,
+                   user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
+    if not session.get(Contract, contract_id):
+        raise HTTPException(404, "Договор не найден.")
+    return document_files(session, user, include_deleted, contract_id=contract_id)
+
+
+@router.post("/applications/{application_id}/files", tags=["files"], response_model=FileResponse,
+             status_code=201, responses=ERRORS, summary="Загрузить файл заявки")
+async def upload_application_file(application_id: int, request: Request,
+                                  file_kind: Literal["signed_scan", "source_file"] = Form(...),
+                                  file: UploadFile = File(...),
+                                  user: AppUser = Security(require_api_user),
+                                  session: Session = Depends(get_session)):
+    application = session.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, "Заявка не найдена.")
+    return await upload_document_file(session, request, user, file, file_kind, application=application)
+
+
+@router.get("/applications/{application_id}/files", tags=["files"], response_model=list[FileResponse],
+            responses=ERRORS, summary="Получить файлы заявки")
+def application_files(application_id: int, include_deleted: bool = False,
+                      user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
+    if not session.get(Application, application_id):
+        raise HTTPException(404, "Заявка не найдена.")
+    return document_files(session, user, include_deleted, application_id=application_id)
+
+
+@router.post("/additional-agreements/{agreement_id}/files", tags=["files"], response_model=FileResponse,
+             status_code=201, responses=ERRORS, summary="Загрузить файл дополнительного соглашения")
+async def upload_agreement_file(agreement_id: int, request: Request,
+                                file_kind: Literal["signed_scan", "source_file"] = Form(...),
+                                file: UploadFile = File(...),
+                                user: AppUser = Security(require_api_user),
+                                session: Session = Depends(get_session)):
+    agreement = session.get(AdditionalAgreement, agreement_id)
+    if not agreement:
+        raise HTTPException(404, "Дополнительное соглашение не найдено.")
+    return await upload_document_file(session, request, user, file, file_kind, agreement=agreement)
+
+
+@router.get("/additional-agreements/{agreement_id}/files", tags=["files"],
+            response_model=list[FileResponse], responses=ERRORS,
+            summary="Получить файлы дополнительного соглашения")
+def agreement_files(agreement_id: int, include_deleted: bool = False,
+                    user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
+    if not session.get(AdditionalAgreement, agreement_id):
+        raise HTTPException(404, "Дополнительное соглашение не найдено.")
+    return document_files(session, user, include_deleted, agreement_id=agreement_id)
+
+
+@router.get("/files/{file_id}/download", tags=["files"], responses=FILE_DOWNLOAD_RESPONSE,
+            summary="Скачать файл")
+def download_file(file_id: int, _user: AppUser = Security(require_api_user),
+                  session: Session = Depends(get_session)):
+    attachment = get_attachment_metadata(session, file_id)
+    if not attachment:
+        raise HTTPException(404, "Файл не найден.")
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(attachment.original_name)}",
+        "Content-Length": str(attachment.size_bytes),
+        "X-Content-Type-Options": "nosniff",
+    }
+    return StreamingResponse(stream_attachment(file_id), media_type=attachment.mime_type, headers=headers)
+
+
+@router.delete("/files/{file_id}", tags=["files"], status_code=204, responses=ERRORS,
+               summary="Удалить файл")
+def delete_file(file_id: int, request: Request, user: AppUser = Security(require_api_user),
+                session: Session = Depends(get_session)):
+    attachment = get_attachment_metadata(session, file_id, include_deleted=True)
+    if not attachment:
+        raise HTTPException(404, "Файл не найден.")
+    try:
+        delete_attachment(session, attachment, user.id, user.role, audit_actor=actor(request, user))
+    except AttachmentError as error:
+        attachment_http_error(error)
+    return Response(status_code=204)
+
+
+@router.post("/files/{file_id}/restore", tags=["files"], response_model=FileResponse,
+             responses=ERRORS, summary="Восстановить файл")
+def restore_file(file_id: int, request: Request, user: AppUser = Security(require_api_user),
+                 session: Session = Depends(get_session)):
+    attachment = get_attachment_metadata(session, file_id, include_deleted=True)
+    if not attachment:
+        raise HTTPException(404, "Файл не найден.")
+    try:
+        restore_attachment(session, attachment, user.id, user.role, audit_actor=actor(request, user))
+    except AttachmentError as error:
+        attachment_http_error(error)
+    return file_data(attachment)
 
 
 @router.get("/audit", tags=["audit"], response_model=AuditPage, responses=ERRORS,

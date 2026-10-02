@@ -32,7 +32,10 @@ def update_application(session, application, number, signed_date, date_end):
 
 
 @audited
-def save_application_item(session, application, specialty, qualification, form_data, item=None, catalog_only=False):
+def save_application_item(
+    session, application, specialty, qualification, form_data, item=None, catalog_only=False,
+    user_id=None,
+):
     values = {int(key.removeprefix("demand_")): int(value) if str(value).strip().isdigit() else 0
               for key, value in form_data.items() if key.startswith("demand_")}
     specialty_ref = (
@@ -42,7 +45,15 @@ def save_application_item(session, application, specialty, qualification, form_d
     )
     order = application.current_order
     if not order:
-        raise ValueError("У заявки нет действующей редакции заказа.")
+        order = Order(
+            organization_id=application.organization_id,
+            application_id=application.id,
+            status="CURRENT",
+            created_by=user_id,
+            is_current=True,
+        )
+        session.add(order)
+        session.flush()
     if item:
         if item.order.application_id != application.id:
             raise ValueError("Строка заказа не относится к этой заявке.")

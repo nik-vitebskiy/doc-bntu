@@ -41,6 +41,7 @@ from .services.file_service import (
     create_attachment,
     delete_attachment,
     get_attachment_metadata,
+    read_attachment_content,
     restore_attachment,
     stream_attachment,
 )
@@ -134,15 +135,6 @@ def human_file_size(value: int) -> str:
 
 
 views.env.filters["filesize"] = human_file_size
-
-
-async def read_uploaded_file(file: UploadFile) -> bytes:
-    content = bytearray()
-    while chunk := await file.read(1024 * 1024):
-        content.extend(chunk)
-        if len(content) > MAX_FILE_SIZE:
-            raise AttachmentError("Файл превышает допустимый размер 50 МБ.")
-    return bytes(content)
 
 
 def load_attachment_relations(entity) -> None:
@@ -926,7 +918,7 @@ async def add_application_file(request: Request, application_id: int, file_kind:
             raise AttachmentError("Этот тип файла нельзя загружать вручную.")
         create_attachment(
             s, application=application, filename=file.filename or "", mime_type=file.content_type or "",
-            content=await read_uploaded_file(file), file_kind=file_kind, uploaded_by=request.state.user.id,
+            content=await read_attachment_content(file), file_kind=file_kind, uploaded_by=request.state.user.id,
             audit_actor=audit_actor(request),
         )
     except AttachmentError as error:
@@ -1287,7 +1279,7 @@ async def add_contract_file(request: Request, contract_id: int, file_kind: str =
             raise AttachmentError("Этот тип файла нельзя загружать вручную.")
         create_attachment(
             s, contract=c, filename=file.filename or "", mime_type=file.content_type or "",
-            content=await read_uploaded_file(file), file_kind=file_kind, uploaded_by=request.state.user.id,
+            content=await read_attachment_content(file), file_kind=file_kind, uploaded_by=request.state.user.id,
             audit_actor=audit_actor(request),
         )
     except AttachmentError as error:
@@ -1307,7 +1299,7 @@ async def add_agreement_file(request: Request, agreement_id: int, file_kind: str
             raise AttachmentError("Этот тип файла нельзя загружать вручную.")
         create_attachment(
             s, agreement=agreement, filename=file.filename or "", mime_type=file.content_type or "",
-            content=await read_uploaded_file(file), file_kind=file_kind, uploaded_by=request.state.user.id,
+            content=await read_attachment_content(file), file_kind=file_kind, uploaded_by=request.state.user.id,
             audit_actor=audit_actor(request),
         )
     except AttachmentError as error:

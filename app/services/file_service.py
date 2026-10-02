@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, defer, joinedload
 
 from ..models import AdditionalAgreement, Application, Contract, Document, DocumentAttachment, SessionLocal
@@ -29,6 +29,15 @@ ALLOWED_MIME_TYPES = {
 
 class AttachmentError(ValueError):
     pass
+
+
+async def read_attachment_content(file: Any) -> bytes:
+    content = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        content.extend(chunk)
+        if len(content) > MAX_FILE_SIZE:
+            raise AttachmentError("Файл превышает допустимый размер 50 МБ.")
+    return bytes(content)
 
 
 def validate_attachment(filename: str, mime_type: str, content: bytes) -> tuple[str, str]:
@@ -166,6 +175,40 @@ def get_attachment_metadata(session: Session, attachment_id: int, *, include_del
     if not include_deleted:
         statement = statement.where(DocumentAttachment.deleted_at.is_(None))
     return session.scalar(statement)
+
+
+def list_attachments(
+    session: Session,
+    *,
+    contract_id: int | None = None,
+    application_id: int | None = None,
+    agreement_id: int | None = None,
+    include_deleted: bool = False,
+    actor_id: int | None = None,
+    actor_role: str = "",
+) -> list[DocumentAttachment]:
+    identifiers = [value for value in (contract_id, application_id, agreement_id) if value is not None]
+    if len(identifiers) != 1:
+        raise AttachmentError("Нужно указать ровно один документ.")
+    statement = (
+        select(DocumentAttachment)
+        .join(Document, Document.id == DocumentAttachment.document_id)
+        .options(defer(DocumentAttachment.content), joinedload(DocumentAttachment.uploader))
+    )
+    if contract_id is not None:
+        statement = statement.where(Document.contract_id == contract_id)
+    elif application_id is not None:
+        statement = statement.where(Document.application_id == application_id)
+    else:
+        statement = statement.where(Document.additional_agreement_id == agreement_id)
+    if not include_deleted:
+        statement = statement.where(DocumentAttachment.deleted_at.is_(None))
+    elif actor_role != "ADMIN":
+        statement = statement.where(or_(
+            DocumentAttachment.deleted_at.is_(None),
+            DocumentAttachment.uploaded_by == actor_id,
+        ))
+    return list(session.scalars(statement.order_by(DocumentAttachment.uploaded_at.desc(), DocumentAttachment.id.desc())))
 
 
 def stream_attachment(attachment_id: int, chunk_size: int = DOWNLOAD_CHUNK_SIZE) -> Iterator[bytes]:
