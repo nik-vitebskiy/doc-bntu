@@ -8,3 +8,5 @@ templates/dop_soglashenie.docx
 __pycache__/
 docx_inspect/
 xlsx_inspect/
+
+.env
