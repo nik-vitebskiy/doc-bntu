@@ -3,9 +3,22 @@ from fastapi.responses import Response
 from fastapi.security import APIKeyCookie
 
 from ..models import AppUser, SessionLocal
+from ..services.access_recovery_service import (
+    NEUTRAL_RECOVERY_MESSAGE,
+    RecoveryUnavailableError,
+    request_access_recovery,
+)
 from ..services.audit_service import AuditActor
 from ..services.auth_service import AccountDisabledError, authenticate, change_password, update_email, verify_password
-from .schemas import AuthenticatedUserResponse, ChangePasswordRequest, ErrorResponse, LoginRequest, UpdateEmailRequest
+from .schemas import (
+    AuthenticatedUserResponse,
+    ChangePasswordRequest,
+    ErrorResponse,
+    ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    UpdateEmailRequest,
+)
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -66,6 +79,37 @@ def login(payload: LoginRequest, request: Request):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный логин или пароль.")
         request.session["user_id"] = user.id
         return _user_response(user)
+    finally:
+        session.close()
+
+
+@router.post(
+    "/forgot",
+    response_model=MessageResponse,
+    responses={
+        503: {"model": ErrorResponse, "description": "SMTP не настроен или временно недоступен"},
+        422: {"model": ErrorResponse, "description": "Некорректный формат email"},
+    },
+    summary="Запросить восстановление доступа",
+    description=(
+        "Публичный эндпоинт. Всегда возвращает одинаковый ответ для существующего и "
+        "несуществующего адреса, чтобы не раскрывать учётные записи. Не более трёх "
+        "обработанных запросов на один email в час."
+    ),
+)
+def forgot_password(payload: ForgotPasswordRequest, request: Request):
+    session = SessionLocal()
+    try:
+        try:
+            request_access_recovery(
+                session,
+                str(payload.email),
+                login_url=f"{str(request.base_url).rstrip('/')}/login",
+                ip_address=request.client.host if request.client else None,
+            )
+        except RecoveryUnavailableError as error:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
+        return MessageResponse(message=NEUTRAL_RECOVERY_MESSAGE)
     finally:
         session.close()
 

@@ -28,6 +28,11 @@ from .services.auth_service import (
     update_user,
     verify_password,
 )
+from .services.access_recovery_service import (
+    NEUTRAL_RECOVERY_MESSAGE,
+    RecoveryUnavailableError,
+    request_access_recovery,
+)
 from .services.application_service import create_application, save_application_item, update_application
 from .services.audit_service import AuditActor
 from .services.audit_registry_service import ACTION_LABELS, ENTITY_FILTERS, get_audit_registry
@@ -195,8 +200,8 @@ def swagger_ui():
 async def require_login(request: Request, call_next):
     path = request.url.path
     public_paths = {
-        "/setup", "/login", "/docs", "/openapi.json",
-        "/api/auth/login", "/api/health",
+        "/setup", "/login", "/forgot", "/docs", "/openapi.json",
+        "/api/auth/login", "/api/auth/forgot", "/api/health",
     }
     if path.startswith("/static") or path in public_paths:
         return await call_next(request)
@@ -274,6 +279,37 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     s.close()
     destination = "/change-password" if must_change_password else "/set-email" if must_set_email else "/"
     return RedirectResponse(destination, status_code=303)
+
+
+@app.get("/forgot", response_class=HTMLResponse, include_in_schema=False)
+def forgot_form(request: Request):
+    return views.TemplateResponse(request, "forgot.html", {"error": "", "message": "", "email": ""})
+
+
+@app.post("/forgot", response_class=HTMLResponse, include_in_schema=False)
+def forgot(request: Request, email: str = Form("")):
+    session = db()
+    try:
+        request_access_recovery(
+            session,
+            email,
+            login_url=f"{str(request.base_url).rstrip('/')}/login",
+            ip_address=request.client.host if request.client else None,
+        )
+    except RecoveryUnavailableError as error:
+        session.close()
+        return views.TemplateResponse(request, "forgot.html", {
+            "error": str(error), "message": "", "email": email,
+        }, status_code=503)
+    except ValueError as error:
+        session.close()
+        return views.TemplateResponse(request, "forgot.html", {
+            "error": str(error), "message": "", "email": email,
+        }, status_code=422)
+    session.close()
+    return views.TemplateResponse(request, "forgot.html", {
+        "error": "", "message": NEUTRAL_RECOVERY_MESSAGE, "email": "",
+    })
 
 @app.get("/logout")
 def logout(request: Request):

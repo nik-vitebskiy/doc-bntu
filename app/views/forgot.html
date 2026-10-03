@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Восстановление доступа — Кадровый заказ</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/forms.css">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="brand">◈ <b>Кадровый заказ</b></div>
+    <h1>Восстановление доступа</h1>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if message %}<p class="success">{{ message }}</p>{% endif %}
+    {% if not message %}
+    <form method="post" action="/forgot">
+      <label>Электронная почта
+        <input name="email" type="email" value="{{ email }}" autocomplete="email" required autofocus>
+      </label>
+      <button class="button">Восстановить доступ</button>
+    </form>
+    {% endif %}
+    <p><a href="/login">Вернуться ко входу</a></p>
+  </main>
+</body>
+</html>

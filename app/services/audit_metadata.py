@@ -14,6 +14,7 @@ ACTION_LABELS = {
     "FILE_RESTORE": "Восстановлен файл",
     "COPY": "Копирование заказа (активация д.с.)",
     "LOGIN": "Вход в систему",
+    "RECOVERY_REQUEST": "Запрос восстановления доступа",
 }
 
 ENTITY_FILTERS = {
@@ -100,6 +101,7 @@ FIELD_LABELS = {
     "is_active": "Активен",
     "must_change_password": "Требуется сменить пароль",
     "last_login_at": "Последний вход",
+    "recovery_result": "Результат",
     "key": "Параметр",
     "value": "Значение",
     "description": "Описание",
@@ -121,6 +123,9 @@ VALUE_LABELS = {
     "ADMIN": "Администратор",
     "HEAD": "Руководитель отдела",
     "SYSTEM": "Система",
+    "sent": "Отправлено",
+    "not_sent": "Не отправлено",
+    "rate_limited": "Не отправлено: превышен лимит",
 }
 
 # These values remain useful for forensic storage, but add no information to
@@ -149,6 +154,7 @@ HIDDEN_DIFF_FIELDS = {
     "target_order_id",
     "rows_count",
     "import_key",
+    "email_fingerprint",
 }
 
 # Foreign keys which carry business meaning and therefore remain visible.
