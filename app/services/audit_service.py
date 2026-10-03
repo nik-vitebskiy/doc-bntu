@@ -40,6 +40,7 @@ class AuditAction(StrEnum):
     FILE_RESTORE = "FILE_RESTORE"
     COPY = "COPY"
     LOGIN = "LOGIN"
+    RECOVERY_REQUEST = "RECOVERY_REQUEST"
 
 
 @dataclass(frozen=True)

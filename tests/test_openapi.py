@@ -20,7 +20,7 @@ EXPECTED_TAGS = {
 }
 
 EXPECTED_OPERATIONS = {
-    ("post", "/api/auth/login"), ("post", "/api/auth/logout"),
+    ("post", "/api/auth/login"), ("post", "/api/auth/forgot"), ("post", "/api/auth/logout"),
     ("get", "/api/auth/me"), ("put", "/api/auth/email"),
     ("post", "/api/auth/change-password"),
     ("get", "/api/faculties"), ("get", "/api/specialties"),
@@ -104,7 +104,7 @@ def test_every_documented_operation_has_summary_tags_security_and_response_schem
         operation = schema["paths"][path][method]
         assert operation.get("summary"), f"Нет summary: {method.upper()} {path}"
         assert operation.get("tags"), f"Нет tags: {method.upper()} {path}"
-        if path != "/api/auth/login":
+        if path not in {"/api/auth/login", "/api/auth/forgot"}:
             assert operation.get("security") == [{"cookieAuth": []}], f"Нет cookieAuth: {method.upper()} {path}"
             assert "401" in operation["responses"]
         success_code = "204" if (method, path) in {

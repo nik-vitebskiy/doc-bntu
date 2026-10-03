@@ -12,6 +12,14 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, examples=["my-test-password"])
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(examples=["employee@bntu.by"])
+
+
+class MessageResponse(BaseModel):
+    message: str = Field(examples=["Если такая почта зарегистрирована, письмо отправлено"])
+
+
 class AuthenticatedUserResponse(BaseModel):
     id: int = Field(description="Идентификатор сотрудника")
     username: str = Field(description="Логин; в личном профиле доступен только для чтения")
