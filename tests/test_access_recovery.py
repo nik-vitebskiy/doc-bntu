@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.main import app
 from app.models import AppUser, AuditLog
-from app.services.access_recovery_service import NEUTRAL_RECOVERY_MESSAGE
+from app.services.access_recovery_service import NEUTRAL_RECOVERY_MESSAGE, application_login_url
 from app.services.auth_service import hash_password
 
 
@@ -77,8 +77,11 @@ def test_existing_email_receives_temporary_password_and_requires_change(session,
         body = message.get_content()
         temporary_password = re.search(r"Временный пароль: (\S+)", body).group(1)
         assert len(temporary_password) >= 10
-        assert "Логин: recovery-user" in body
-        assert "http://testserver/login" in body
+        assert body.startswith("Здравствуйте!\n\nВы запросили восстановление доступа")
+        assert "Ваш логин: recovery-user" in body
+        assert "Войти: http://localhost:8000/login" in body
+        assert "При входе система предложит задать собственный пароль" in body
+        assert "Если запрос отправили не вы — просто проигнорируйте письмо" in body
 
         login = browser.post("/api/auth/login", json={
             "username": "recovery-user", "password": temporary_password,
@@ -145,3 +148,14 @@ def test_login_page_links_to_recovery_form(monkeypatch, session):
         form = browser.get("/forgot")
     assert 'href="/forgot"' in login.text
     assert 'action="/forgot"' in form.text
+
+
+def test_application_login_url_uses_env_default_and_normalizes_trailing_slash(monkeypatch):
+    monkeypatch.setenv("APP_URL", "http://10.0.0.25:8000")
+    assert application_login_url() == "http://10.0.0.25:8000/login"
+
+    monkeypatch.setenv("APP_URL", "http://kadry-zakaz.bntu.by/")
+    assert application_login_url() == "http://kadry-zakaz.bntu.by/login"
+
+    monkeypatch.delenv("APP_URL", raising=False)
+    assert application_login_url() == "http://localhost:8000/login"

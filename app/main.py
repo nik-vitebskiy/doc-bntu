@@ -293,7 +293,6 @@ def forgot(request: Request, email: str = Form("")):
         request_access_recovery(
             session,
             email,
-            login_url=f"{str(request.base_url).rstrip('/')}/login",
             ip_address=request.client.host if request.client else None,
         )
     except RecoveryUnavailableError as error:
