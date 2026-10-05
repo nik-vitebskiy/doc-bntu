@@ -104,7 +104,6 @@ def forgot_password(payload: ForgotPasswordRequest, request: Request):
             request_access_recovery(
                 session,
                 str(payload.email),
-                login_url=f"{str(request.base_url).rstrip('/')}/login",
                 ip_address=request.client.host if request.client else None,
             )
         except RecoveryUnavailableError as error:

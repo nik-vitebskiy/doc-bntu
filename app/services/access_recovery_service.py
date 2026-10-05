@@ -61,24 +61,32 @@ def generate_temporary_password() -> str:
     return "".join(secrets.choice(TEMPORARY_PASSWORD_ALPHABET) for _ in range(TEMPORARY_PASSWORD_LENGTH))
 
 
+def application_login_url() -> str:
+    app_url = os.getenv("APP_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+    return f"{app_url.rstrip('/')}/login"
+
+
 def send_recovery_email(
     settings: SmtpSettings,
     *,
     recipient: str,
     username: str,
     temporary_password: str,
-    login_url: str,
 ) -> None:
     message = EmailMessage()
     message["From"] = formataddr(("Кадровый заказ — БНТУ", settings.from_address))
     message["To"] = recipient
     message["Subject"] = "Восстановление доступа — Кадровый заказ"
     message.set_content(
-        "Получен запрос на восстановление доступа к системе «Кадровый заказ».\n\n"
-        f"Логин: {username}\n"
+        "Здравствуйте!\n\n"
+        "Вы запросили восстановление доступа к системе «Кадровый заказ».\n\n"
+        f"Ваш логин: {username}\n"
         f"Временный пароль: {temporary_password}\n"
-        f"Ссылка на систему: {login_url}\n\n"
-        "При входе система попросит задать новый пароль."
+        f"\nВойти: {application_login_url()}\n\n"
+        "При входе система предложит задать собственный пароль — временный\n"
+        "будет действовать только для этого входа.\n\n"
+        "Если запрос отправили не вы — просто проигнорируйте письмо, пароль\n"
+        "не изменится."
     )
 
     smtp_class = smtplib.SMTP_SSL if settings.port == 465 else smtplib.SMTP
@@ -125,7 +133,6 @@ def request_access_recovery(
     session: Session,
     email: str,
     *,
-    login_url: str,
     ip_address: str | None = None,
 ) -> None:
     normalized_email = normalize_email(email)
@@ -160,7 +167,6 @@ def request_access_recovery(
                 recipient=normalized_email,
                 username=user.username,
                 temporary_password=temporary_password,
-                login_url=login_url,
             )
             audit.record_values(
                 AuditAction.RECOVERY_REQUEST,
